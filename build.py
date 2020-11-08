@@ -2,7 +2,6 @@ import glob
 import asdf
 import numpy as np
 import sys
-from util import simple_load, get_slab_halo, extract_superslab
 from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
 import numpy.lib.recfunctions as rfn
@@ -10,6 +9,7 @@ import time
 import gc
 import os
 
+from tools.merger import simple_load, get_slab_halo, extract_superslab
 from compaso_halo_catalog import CompaSOHaloCatalog
 
 # reorder in terms of their slab number
@@ -24,6 +24,7 @@ def reorder_by_slab(fns):
 def get_zs_from_snap_names(snap_names):
     return np.array(sorted([float(sub.split('z')[-1][:5]) for sub in snap_names]))
 
+# read redshifts from tuks
 def get_zs_from_headers(snap_names):
     zs = np.zeros(len(snap_names))
     for i in range(len(snap_names)):
@@ -67,15 +68,16 @@ def correct_inds(halo_ids, N_halos_slabs, slabs, start=0,stop=None,copies=1):
         
     return ids
 
+# load merger tree and progenitors information
 def get_mt_info(fns,fields,origin,start=0,stop=None,copies=1):
 
-    # load merger tree and progenitors information
+    # if we are loading all progenitors and not just main
     if 'Progenitors' in fields:
         merger_tree, progs = simple_load(fns[start:stop],fields=fields)
     else:
         merger_tree = simple_load(fns[start:stop],fields=fields)
 
-    # attach copies of box
+    # if a far redshift, need 2 copies only
     if copies == 2:
         merger_tree0 = merger_tree
         merger_tree1 = merger_tree.copy()
@@ -84,7 +86,7 @@ def get_mt_info(fns,fields,origin,start=0,stop=None,copies=1):
         merger_tree2['Position'] += np.array([0,2000.,0])
         merger_tree = np.hstack((merger_tree1,merger_tree2))
         
-        
+    # if in intermediate redshift range, need 3 copies
     elif copies == 3:
         merger_tree0 = merger_tree
         merger_tree1 = merger_tree.copy()
@@ -100,22 +102,22 @@ def get_mt_info(fns,fields,origin,start=0,stop=None,copies=1):
     pos = merger_tree['Position']
     main_prog = merger_tree['MainProgenitor']
     halo_ind = merger_tree['HaloIndex']
+
+    # compute comoving distance to observer of every halo
+    com_dist = np.sqrt(np.sum((pos-origin)**2,axis=1))
     
+    # if loading all progenitors
     if 'Progenitors' in fields:
         num_progs = merger_tree['NumProgenitors']
-    
         # get an array with the starting indices of the progenitors array
         start_progs = np.zeros(merger_tree.shape,dtype=int)
         start_progs[1:] = num_progs.cumsum()[:-1]
-    
-    # compute comoving distance to observer of every halo
-    com_dist = np.sqrt(np.sum((pos-origin)**2,axis=1))
-
-    if 'Progenitors' in fields:
+        
         return com_dist, main_prog, halo_ind, pos, start_progs, num_progs, progs, N_halos_slabs, slabs
 
     return com_dist, main_prog, halo_ind, pos, start_progs, N_halos_slabs, slabs
 
+# solve when the crossing of the light cones occurs and the interpolated position and velocity
 def solve_crossing(r1,r2,pos1,pos2,chi1,chi2):
     # solve for eta_star, where chi = eta_0-eta
     # equation is r1+(chi1-chi)/(chi1-chi2)*(r2-r1) = chi
@@ -136,7 +138,8 @@ def solve_crossing(r1,r2,pos1,pos2,chi1,chi2):
     
     return chi_star, pos_star, vel_star, mask
 
-
+# tuks include chunk
+# save light cone catalog
 def save_asdf(table,filename,header,cat_lc_dir,z_in):
     # cram into a dictionary
     data_dict = {}
@@ -144,7 +147,7 @@ def save_asdf(table,filename,header,cat_lc_dir,z_in):
         field = table.dtype.names[j]
         data_dict[field] = table[field]
         
-    # create data tree structure                                                                                                                           
+    # create data tree structure
     data_tree = {
         "data": data_dict,
         "header": header,
@@ -154,8 +157,8 @@ def save_asdf(table,filename,header,cat_lc_dir,z_in):
     output_file = asdf.AsdfFile(data_tree)
     output_file.write_to(os.path.join(cat_lc_dir,"z%.3f"%z_in,filename+"_z%.3f.asdf"%z_in))
     output_file.close()
-    
-# TODO: copy halo info (just get rid of fields=fields_cat);  velocity interpolation (could be done when velocities are summoned, maybe don't interpolate); delete things properly
+
+# TODO: copy halo info (just get rid of fields=fields_cat);  velocity interpolation (could be done when velocities are summoned, maybe don't interpolate); delete things properly; read parameters from header; what if 3 to 2 boxes
 
 # cosmological parameters
 h = 0.6736
@@ -176,15 +179,21 @@ sim_name = "AbacusSummit_base_c000_ph006"
 #sim_name = "AbacusSummit_highbase_c000_ph100"
 
 # directory where the halo catalogs are saved
-cat_dir = "/mnt/store/lgarrison/"+sim_name+"/halos/"
+#cat_dir = "/mnt/store/lgarrison/"+sim_name+"/halos/"
+cat_dir = "/mnt/store2/bigsims/"+sim_name+"/halos/"
 
 # directory where the merger tree is stored
-merger_dir = "/mnt/store/AbacusSummit/merger/"+sim_name+"/"
+#merger_dir = "/mnt/store/AbacusSummit/merger/"+sim_name+"/"
+merger_dir = "/mnt/store2/bigsims/merger/"+sim_name+"/"
 
 # directory where we save the final outputs
-cat_lc_dir = "/mnt/store/boryanah/"+sim_name+"/halos_light_cones/"
+cat_lc_dir = "/mnt/store1/boryanah/"+sim_name+"/halos_light_cones/"
+if not os.path.exists(cat_lc_dir): os.makedirs(cat_lc_dir)
 
 # all redshifts, steps and comoving distances of light cones files; high z to low z
+#zs_all = np.load("/home/boryanah/HOD_Abacus/light_cones/data_headers/redshifts.npy")
+#steps_all = np.load("/home/boryanah/HOD_Abacus/light_cones/data_headers/steps.npy")
+#chis_all = np.load("/home/boryanah/HOD_Abacus/light_cones/data_headers/coord_dist.npy")
 zs_all = np.load("/home/boryanah/HOD_Abacus/light_cones/data_headers/redshifts.npy")
 steps_all = np.load("/home/boryanah/HOD_Abacus/light_cones/data_headers/steps.npy")
 chis_all = np.load("/home/boryanah/HOD_Abacus/light_cones/data_headers/coord_dist.npy")
@@ -199,7 +208,6 @@ z_of_chi = interp1d(chis_all,zs_all)
 
 # all merger tree snapshots and corresponding redshifts
 snaps_mt = sorted(glob.glob(merger_dir+"associations_z*.0.asdf"))
-#zs_mt = get_zs_from_snap_names(snaps_mt)
 # more accurate, slightly slower
 if not os.path.exists("data/zs_mt.npy"):
     zs_mt = get_zs_from_headers(snaps_mt)
@@ -218,10 +226,13 @@ z1 = z_of_chi(0.5*Lbox-origin[0])
 z2 = z_of_chi((0.5*Lbox-origin[0])*np.sqrt(2))
 
 # initial redshift where we start building the trees
-z_start = 0.5#np.min(zs_mt)
+z_start = 0.5
+#z_start = np.min(zs_mt)
 ind_start = np.argmin(np.abs(zs_mt-z_start))
+# initialize difference between the conformal time of last two shells
 delta_chi_old = 0.
 
+# loop over each merger tree redshift
 for i in range(ind_start,len(zs_mt)-1):
 
     # starting snapshot
@@ -239,7 +250,7 @@ for i in range(ind_start,len(zs_mt)-1):
     elif z_prev > z2: copies_prev = 2
     else: copies_prev = 3
     print("copies of the box needed = ",copies_in,copies_prev)
-
+    
     # what is the coordinate distance of the light cone at that redshift and the previous 
     if z_in < np.min(zs_all): chi_in = chi_of_z(np.min(zs_all)); z_in = 0.1 # to avoid getting out of the interpolation range
     else: chi_in = chi_of_z(z_in)
@@ -247,12 +258,12 @@ for i in range(ind_start,len(zs_mt)-1):
     delta_chi = chi_prev-chi_in
     print("comoving distance now and previous = ",chi_in,chi_prev)
 
-    # load merger trees at this snapshot
+    # read merger trees file names at this and previous snapshot
     fns_in = sorted(glob.glob(merger_dir+"associations_z%4.3f.*.asdf"%(z_in)))
     fns_prev = sorted(glob.glob(merger_dir+"associations_z%4.3f.*.asdf"%(z_prev)))
     print("Number of files = ",len(fns_in),len(fns_prev))
 
-    # starting and finishing superslab number (None is all)
+    # starting and finishing superslab number (None is all); tuks: perhaps always load 0 this and +-1 prev; how do indices work
     start_in = 0
     stop_in = 2#None
     start_prev = 0
@@ -272,7 +283,7 @@ for i in range(ind_start,len(zs_mt)-1):
     print("N_halos_in = ",N_halos_in)
     print("N_halos_prev = ",N_halos_prev)
 
-    # if eligible, can be selected for light cone redshift catalog
+    # if eligible, can be selected for light cone redshift catalog; all start as eligible
     if i == ind_start:
         eligibility_in = np.ones(N_halos_in,dtype=bool)
     eligibility_prev = np.ones(N_halos_prev,dtype=bool)
@@ -283,13 +294,14 @@ for i in range(ind_start,len(zs_mt)-1):
     # we want to generally get rid of those that are not eligible i.e. elig = False
     # ~elig is True
 
-    # mask where no merger tree info is available
+    # mask where no merger tree info is available or halos that are not eligible
     mask_noinfo_in = (main_prog_in <= 0) | (~eligibility_in)
     mask_info_in = ~mask_noinfo_in
 
-    print("masked no info = ",np.sum(mask_noinfo_in)/len(mask_noinfo_in)*100.)
+    # print percentage where no information is available or halo not eligible
+    print("percentage no info or ineligible = ",np.sum(mask_noinfo_in)/len(mask_noinfo_in)*100.)
 
-    # no info is denoted by 0 or -999, but -999 messes with unpacking, so we set it to 0
+    # no info is denoted by 0 or -999 (or regular if ineligible), but -999 messes with unpacking, so we set it to 0
     main_prog_in[mask_noinfo_in] = 0
 
     # rework the main progenitor and halo indices to retun in proper order
@@ -330,6 +342,7 @@ for i in range(ind_start,len(zs_mt)-1):
     mask_lc_in_noinfo = ((com_dist_in_noinfo >= chi_in - delta_chi_old/2.) & (com_dist_in_noinfo < chi_in + delta_chi/2.)) | (~eligibility_in_noinfo)
     #mask_lc_in_noinfo = ((com_dist_in_noinfo >= chi_in) & (com_dist_in_noinfo < chi_prev)) | (~eligibility_in_noinfo)
 
+    # percentage of objects that are part of this or previous snapshot
     print("masked no info crossing = ",np.sum(mask_lc_in_noinfo)/len(mask_lc_in_noinfo)*100.)
     print("masked with info crossing = ",np.sum(mask_lc_in_info)/len(mask_lc_in_info)*100.)
 
@@ -351,10 +364,11 @@ for i in range(ind_start,len(zs_mt)-1):
     com_dist_prev_main_in_noinfo_lc = com_dist_prev_main_in_noinfo[mask_lc_in_noinfo]
     halo_ind_in_noinfo_lc = halo_ind_in_noinfo[mask_lc_in_noinfo]
     eligibility_in_noinfo_lc = eligibility_in_noinfo[mask_lc_in_noinfo]
-    # todo: fix
+    # todo: fix velocity
     pos_star_in_noinfo_lc = pos_in_noinfo_lc
     vel_star_in_noinfo_lc = pos_in_noinfo_lc*0.
 
+    # this is for those objects that are crossing light cone closer to previous redshift
     if i != ind_start:
         pos_star_in_noinfo_lc[~eligibility_in_noinfo_lc] = pos_star_next
         vel_star_in_noinfo_lc[~eligibility_in_noinfo_lc] = vel_star_next
@@ -363,7 +377,7 @@ for i in range(ind_start,len(zs_mt)-1):
     # get chi star where lc crosses halo trajectory
     chi_star_in_info_lc, pos_star_in_info_lc, vel_star_in_info_lc, bool_star_in_info_lc = solve_crossing(com_dist_prev_main_in_info_lc,com_dist_in_info_lc,pos_prev_main_in_info_lc,pos_in_info_lc,chi_prev,chi_in)
 
-    # add ineligible halos from last iteration
+    # add ineligible halos from last iteration over the loop
     bool_star_in_info_lc = (bool_star_in_info_lc) | (~eligibility_in_info_lc)
 
     # mark eligibility
