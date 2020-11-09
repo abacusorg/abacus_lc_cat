@@ -10,7 +10,6 @@ import gc
 import os
 
 from tools.merger import simple_load, get_slab_halo, extract_superslab
-from compaso_halo_catalog import CompaSOHaloCatalog
 
 # reorder in terms of their slab number
 def reorder_by_slab(fns):
@@ -20,11 +19,7 @@ def reorder_by_slab(fns):
         tmp[i] = fns[i_sort[i]]
     return tmp
 
-# get redshifts of all snapshots
-def get_zs_from_snap_names(snap_names):
-    return np.array(sorted([float(sub.split('z')[-1][:5]) for sub in snap_names]))
-
-# read redshifts from tuks
+# read redshifts from merger tree files
 def get_zs_from_headers(snap_names):
     zs = np.zeros(len(snap_names))
     for i in range(len(snap_names)):
@@ -49,20 +44,22 @@ def correct_inds(halo_ids, N_halos_slabs, slabs, start=0,stop=None,copies=1):
     # total number of halos in the slabs that we have loaded
     N_halos = np.sum(N_halos_slabs[start:stop])
         
-    # set up offset array
-    offsets = np.zeros(len(slabs),dtype=int)
-    offsets[1:] = np.cumsum(N_halos_slabs)[:-1]
+    # set up offset array for all files
+    offsets_all = np.zeros(len(slabs),dtype=int)
+    offsets_all[1:] = np.cumsum(N_halos_slabs)[:-1]
     
     # select the halos belonging to given slab
-    for i in range(len(slabs)):
+    #offset = 0
+    for i in range(start,stop):
         select = np.where(slab_ids == slabs[i])[0]
-        ids[select] += offsets[i]
+        ids[select] += offsets_all[i]
+        #offset += N_halos_slabs[i]
 
     # add additional offset from multiple copies
     if copies == 2:
-        ids[:N_halos] += 0*N_halos
+        #ids[:N_halos] += 0*N_halos
         ids[N_halos:2*N_halos] += 1*N_halos
-    if copies == 3:
+    elif copies == 3:
         ids[N_halos:2*N_halos] += 1*N_halos
         ids[2*N_halos:3*N_halos] += 2*N_halos
         
@@ -131,34 +128,14 @@ def solve_crossing(r1,r2,pos1,pos2,chi1,chi2):
     # interpolated velocity [km/s]
     vel_star = v_avg*c #vel1+a_avg*(chi1-chi_star)
 
-    # mark eligibility based on chi_star; closest to current redshift
+    # mark eligibility based on chi_star; True is closer to chi2 (current redshift); 
     mask = (np.abs(chi1-chi_star) >  np.abs(chi2-chi_star))
 
     assert np.sum((chi_star > chi1) | (chi_star < chi2)) == 0, "Solution is out of bounds"
     
     return chi_star, pos_star, vel_star, mask
 
-# tuks include chunk
-# save light cone catalog
-def save_asdf(table,filename,header,cat_lc_dir,z_in):
-    # cram into a dictionary
-    data_dict = {}
-    for j in range(len(table.dtype.names)):
-        field = table.dtype.names[j]
-        data_dict[field] = table[field]
-        
-    # create data tree structure
-    data_tree = {
-        "data": data_dict,
-        "header": header,
-    }
-
-    # save the data and close file
-    output_file = asdf.AsdfFile(data_tree)
-    output_file.write_to(os.path.join(cat_lc_dir,"z%.3f"%z_in,filename+"_z%.3f.asdf"%z_in))
-    output_file.close()
-
-# TODO: copy halo info (just get rid of fields=fields_cat);  velocity interpolation (could be done when velocities are summoned, maybe don't interpolate); delete things properly; read parameters from header; what if 3 to 2 boxes
+# TODO: copy halo info (just get rid of fields=fields_cat);  velocity interpolation (could be done when velocities are summoned, maybe don't interpolate); delete things properly; read parameters from header;
 
 # cosmological parameters
 h = 0.6736
@@ -170,6 +147,9 @@ c = 299792.458# km/s
 Lbox = 2000. # Mpc/h
 PPD = 6912
 NP = PPD**3
+
+# want to show plots
+want_plot = True
 
 # location of the origin in Mpc/h
 origin = np.array([-990.,-990.,-990.])
@@ -187,16 +167,13 @@ cat_dir = "/mnt/store2/bigsims/"+sim_name+"/halos/"
 merger_dir = "/mnt/store2/bigsims/merger/"+sim_name+"/"
 
 # directory where we save the final outputs
-cat_lc_dir = "/mnt/store1/boryanah/"+sim_name+"/halos_light_cones/"
+cat_lc_dir = "/mnt/store1/boryanah/light_cone_catalog/"+sim_name+"/halos_light_cones/"
 if not os.path.exists(cat_lc_dir): os.makedirs(cat_lc_dir)
 
 # all redshifts, steps and comoving distances of light cones files; high z to low z
-#zs_all = np.load("/home/boryanah/HOD_Abacus/light_cones/data_headers/redshifts.npy")
-#steps_all = np.load("/home/boryanah/HOD_Abacus/light_cones/data_headers/steps.npy")
-#chis_all = np.load("/home/boryanah/HOD_Abacus/light_cones/data_headers/coord_dist.npy")
-zs_all = np.load("/home/boryanah/HOD_Abacus/light_cones/data_headers/redshifts.npy")
-steps_all = np.load("/home/boryanah/HOD_Abacus/light_cones/data_headers/steps.npy")
-chis_all = np.load("/home/boryanah/HOD_Abacus/light_cones/data_headers/coord_dist.npy")
+zs_all = np.load("data_headers/redshifts.npy")
+steps_all = np.load("data_headers/steps.npy")
+chis_all = np.load("data_headers/coord_dist.npy")
 
 # time step of furthest and closest shell
 step_min = np.min(steps_all)
@@ -223,7 +200,9 @@ fields_cat = ['id','npstartA','npoutA','N','x_L2com','v_L2com']
 # redshift of closest point on wall between original and copied box
 z1 = z_of_chi(0.5*Lbox-origin[0])
 # redshift of closest point where all three boxes touch
-z2 = z_of_chi((0.5*Lbox-origin[0])*np.sqrt(2))
+#z2 = z_of_chi((0.5*Lbox-origin[0])*np.sqrt(2))
+# furthest point where all three boxes touch; TODO: I think that's what we need
+z2 = z_of_chi((0.5*Lbox-origin[0])*np.sqrt(3))
 
 # initial redshift where we start building the trees
 z_start = 0.5
@@ -250,6 +229,9 @@ for i in range(ind_start,len(zs_mt)-1):
     elif z_prev > z2: copies_prev = 2
     else: copies_prev = 3
     print("copies of the box needed = ",copies_in,copies_prev)
+    # set to max for both; still not work
+    copies_in = np.max([copies_in,copies_prev])
+    copies_prev = np.max([copies_in,copies_prev])
     
     # what is the coordinate distance of the light cone at that redshift and the previous 
     if z_in < np.min(zs_all): chi_in = chi_of_z(np.min(zs_all)); z_in = 0.1 # to avoid getting out of the interpolation range
@@ -263,12 +245,21 @@ for i in range(ind_start,len(zs_mt)-1):
     fns_prev = sorted(glob.glob(merger_dir+"associations_z%4.3f.*.asdf"%(z_prev)))
     print("Number of files = ",len(fns_in),len(fns_prev))
 
-    # starting and finishing superslab number (None is all); tuks: perhaps always load 0 this and +-1 prev; how do indices work
+    # number of chunks
+    n_chunks = len(fns_in)
+    assert n_chunks == len(fns_prev), "Incomplete merger tree files"
+    
+    # starting and finishing superslab number (None is all)
+    #i_chunk = 0
+    #start_in = i_chunk
+    #stop_in = i_chunk+1
+    #start_prev = (start_in-1)%n_chunks
+    #stop_prev = (stop_in+1)%n_chunks
     start_in = 0
-    stop_in = 2#None
+    stop_in = None
     start_prev = 0
-    stop_prev = 2#None
-
+    stop_prev = None
+    
     # reorder file names by super slab number
     fns_in = reorder_by_slab(fns_in)
     fns_prev = reorder_by_slab(fns_prev)
@@ -374,20 +365,20 @@ for i in range(ind_start,len(zs_mt)-1):
         vel_star_in_noinfo_lc[~eligibility_in_noinfo_lc] = vel_star_next
         halo_ind_in_noinfo_lc[~eligibility_in_noinfo_lc] = halo_ind_next
 
-    # get chi star where lc crosses halo trajectory
+    # get chi star where lc crosses halo trajectory; bool is False where closer to previous
     chi_star_in_info_lc, pos_star_in_info_lc, vel_star_in_info_lc, bool_star_in_info_lc = solve_crossing(com_dist_prev_main_in_info_lc,com_dist_in_info_lc,pos_prev_main_in_info_lc,pos_in_info_lc,chi_prev,chi_in)
-
-    # add ineligible halos from last iteration over the loop
+    
+    # add ineligible halos if any from last iteration of the loop to those crossed in previous
     bool_star_in_info_lc = (bool_star_in_info_lc) | (~eligibility_in_info_lc)
 
     # mark eligibility
-    # version 1: only the main progenitor is marked ineligible
+    # version 1: only the main progenitor is marked ineligible; ~bool is those that are crossed here and eligible
     halo_ind_next = halo_ind_prev_main_in_info_lc[~bool_star_in_info_lc]
     eligibility_prev[halo_ind_next] = False
     # version 2: all progenitors are marked ineligible
     # slower, but works (perhaps optimize with numba). Confusing part is why halo_inds has zeros
     '''
-    # todo: slight issue is that we mask only for main prog - can perhaps add a clause that takes the main prog value if not an appropriate value is supplied by progs
+    # todo: slight issue is that we mask only for main prog - can perhaps add a clause that takes the main prog value if not an appropriate value is supplied by progs (main prog may not be in progs)
     for j in range(len(start_progs_in_info_lc[~bool_star_in_info_lc])):
         start = (start_progs_in_info_lc[~bool_star_in_info_lc])[j]
         num = (num_progs_in_info_lc[~bool_star_in_info_lc])[j]
@@ -422,96 +413,50 @@ for i in range(ind_start,len(zs_mt)-1):
     vel_interp_lc[N_in_star_lc:N_lc] = vel_star_in_noinfo_lc
     halo_ind_lc[N_in_star_lc:N_lc] = halo_ind_in_noinfo_lc
 
-
-
-
-    # catalog directory
-    catdir = os.path.join(cat_dir,"z%.3f"%z_in)
-
-
-    # load halo catalog, setting unpack to False for speed
-    cat = CompaSOHaloCatalog(catdir, load_subsamples='A_halo_pid', fields=fields_cat, unpack_bits = False)
-
-
-    # halo catalog
-    halo_table = cat.halos[halo_ind_lc]
-    header = cat.header
-    N_halos = len(cat.halos)
-    print("N_halos = ",N_halos)
-
-    # load the pid, set unpack_bits to True
-    pid = cat.subsamples['pid']
-    npstart = halo_table['npstartA']
-    npout = halo_table['npoutA']
-    npstart_new = np.zeros(len(npout),dtype=int)
-    npstart_new[1:] = np.cumsum(npout)[:-1]
-    npout_new = npout
-    pid_new = np.zeros(np.sum(npout_new),dtype=pid.dtype)
-    for j in range(len(npstart)):
-        pid_new[npstart_new[j]:npstart_new[j]+npout_new[j]] = pid[npstart[j]:npstart[j]+npout[j]]
-    pid_table = np.empty(len(pid_new),dtype=[('pid',pid_new.dtype)])
-    pid_table['pid'] = pid_new
-    halo_table['npstartA'] = npstart_new
-    halo_table['npoutA'] = npout_new
-
-    # append new fields
-    halo_table['index_halo'] = halo_ind_lc
-    halo_table['x_interp'] = pos_interp_lc
-    halo_table['v_interp'] = vel_interp_lc
-
     # create directory for this redshift
     if not os.path.exists(os.path.join(cat_lc_dir,"z%.3f"%z_in)):
         os.makedirs(os.path.join(cat_lc_dir,"z%.3f"%z_in))
 
-    # save to files
-    save_asdf(halo_table,"halo_info_lc",header,cat_lc_dir,z_in)
-    save_asdf(pid_table,"pid_lc",header,cat_lc_dir,z_in)
+    # save those arrays
+    table_lc = np.empty(N_lc,dtype=[('halo_ind',halo_ind_lc.dtype),('pos_interp',pos_interp_lc.dtype),('vel_interp',vel_interp_lc.dtype)])
+    table_lc['halo_ind'] = halo_ind_lc
+    table_lc['pos_interp'] = pos_interp_lc
+    table_lc['vel_interp'] = vel_interp_lc
+    np.save(os.path.join(cat_lc_dir,"z%.3f"%z_in,'table_lc.npy'),table_lc)
 
-    # update eligibility array
-    eligibility_in = eligibility_prev
+    if want_plot:
+        # select the halos in the light cones
+        pos_choice = pos_in[halo_ind_lc]
 
-    # TESTING
-    break
+        # selecting thin slab
+        pos_x_min = -995.
+        pos_x_max = -985.
 
-    # delete things at the end
+        ijk = 0
+        choice = (pos_choice[:,ijk] >= pos_x_min) & (pos_choice[:,ijk] < pos_x_max)
+        choice_lc = (pos_in_info[:,ijk] >= pos_x_min) & (pos_in_info[:,ijk] < pos_x_max)
+
+        circle_in = plt.Circle((origin[1], origin[2]), radius=chi_in, color='g', fill=False)
+        circle_prev = plt.Circle((origin[1], origin[2]), radius=chi_prev, color='r', fill=False)
+
+        ax = plt.gca()
+        ax.cla() # clear things for fresh plot
+
+        ax.scatter(pos_in_info[choice_lc,1],pos_in_info[choice_lc,2],s=0.01,alpha=0.5,color='orange')
+        ax.scatter(pos_choice[choice,1],pos_choice[choice,2],s=0.01,alpha=0.5,color='dodgerblue')
+
+        # circles for in and prev
+        ax.add_artist(circle_in)
+        ax.add_artist(circle_prev)
+        plt.xlabel([-1000,3000])
+        plt.ylabel([-1000,3000])
+        plt.axis('equal')
+        plt.show()
+    
     del com_dist_in, main_prog_in, halo_ind_in, pos_in, N_halos_slabs_in, slabs_in
     del com_dist_prev, main_prog_prev, halo_ind_prev, pos_prev, N_halos_slabs_prev, slabs_prev
-    del pid, pid_new, pid_table, npstart, npout, npstart_new, npout_new
-    del halo_table
-    del cat
 
     gc.collect()
-
     delta_chi_old = delta_chi
-
-
-# EVERYTHING DOWN HERE IS FOR PLOTTING
-
-#pos_choice = pos_in_info_lc
-pos_choice = pos_in[halo_ind_lc]
-
-# selecting thin slab
-pos_z_min = -995.
-pos_z_max = -985.
-ijk = 0
-choice = (pos_choice[:,ijk] >= pos_z_min) & (pos_choice[:,ijk] < pos_z_max)
-choice_lc = (pos_in_info[:,ijk] >= pos_z_min) & (pos_in_info[:,ijk] < pos_z_max)
-
-
-circle_in = plt.Circle((origin[1], origin[2]), radius=chi_in, color='g', fill=False)
-circle_prev = plt.Circle((origin[1], origin[2]), radius=chi_prev, color='r', fill=False)
-
-ax = plt.gca()
-ax.cla() # clear things for fresh plot
-
-ax.scatter(pos_in_info[choice_lc,1],pos_in_info[choice_lc,2],s=0.01,alpha=0.5,color='orange')
-ax.scatter(pos_choice[choice,1],pos_choice[choice,2],s=0.01,alpha=0.5,color='dodgerblue')
-# circles for in and prev
-ax.add_artist(circle_in)
-ax.add_artist(circle_prev)
-plt.xlabel([-1000,3000])
-plt.ylabel([-1000,3000])
-plt.axis('equal')
-plt.show()
-
+        
 #dict_keys(['HaloIndex', 'HaloMass', 'HaloVmax', 'IsAssociated', 'IsPotentialSplit', 'MainProgenitor', 'MainProgenitorFrac', 'MainProgenitorPrec', 'MainProgenitorPrecFrac', 'NumProgenitors', 'Position', 'Progenitors'])
