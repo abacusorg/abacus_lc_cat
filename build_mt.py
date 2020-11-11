@@ -149,7 +149,7 @@ PPD = 6912
 NP = PPD**3
 
 # want to show plots
-want_plot = True
+want_plot = False
 
 # location of the origin in Mpc/h
 origin = np.array([-990.,-990.,-990.])
@@ -167,7 +167,7 @@ cat_dir = "/mnt/store2/bigsims/"+sim_name+"/halos/"
 merger_dir = "/mnt/store2/bigsims/merger/"+sim_name+"/"
 
 # directory where we save the final outputs
-cat_lc_dir = "/mnt/store1/boryanah/light_cone_catalog/"+sim_name+"/halos_light_cones/"
+cat_lc_dir = "/mnt/gosling1/boryanah/light_cone_catalog/"+sim_name+"/halos_light_cones/"
 if not os.path.exists(cat_lc_dir): os.makedirs(cat_lc_dir)
 
 # all redshifts, steps and comoving distances of light cones files; high z to low z
@@ -205,7 +205,7 @@ z1 = z_of_chi(0.5*Lbox-origin[0])
 z2 = z_of_chi((0.5*Lbox-origin[0])*np.sqrt(3))
 
 # initial redshift where we start building the trees
-z_start = 0.5
+z_start = 0.5#0.8#0.5
 #z_start = np.min(zs_mt)
 ind_start = np.argmin(np.abs(zs_mt-z_start))
 # initialize difference between the conformal time of last two shells
@@ -228,8 +228,8 @@ for i in range(ind_start,len(zs_mt)-1):
     if z_prev < z1: copies_prev = 1
     elif z_prev > z2: copies_prev = 2
     else: copies_prev = 3
-    print("copies of the box needed = ",copies_in,copies_prev)
     # set to max for both; still not work
+    print("Copies of the box needed = ",copies_in,copies_prev)
     copies_in = np.max([copies_in,copies_prev])
     copies_prev = np.max([copies_in,copies_prev])
     
@@ -256,9 +256,9 @@ for i in range(ind_start,len(zs_mt)-1):
     #start_prev = (start_in-1)%n_chunks
     #stop_prev = (stop_in+1)%n_chunks
     start_in = 0
-    stop_in = None
+    stop_in = n_chunks
     start_prev = 0
-    stop_prev = None
+    stop_prev = n_chunks
     
     # reorder file names by super slab number
     fns_in = reorder_by_slab(fns_in)
@@ -277,6 +277,15 @@ for i in range(ind_start,len(zs_mt)-1):
     # if eligible, can be selected for light cone redshift catalog; all start as eligible
     if i == ind_start:
         eligibility_in = np.ones(N_halos_in,dtype=bool)
+    else:
+        # transitioning from 1 to 3 and 3 to 2
+        if copies_old == 1 and copies_in == 3:
+            eligibility_in = np.hstack((eligibility_in,eligibility_in,eligibility_in))
+        elif copies_old == 3 and copies_in == 2:
+            len_copy = int(len(eligibility_in)//3)
+            # overlap can only be in copy 1 or copy 3 (draw it)
+            eligibility_in = np.hstack((eligibility_in[:len_copy],eligibility_in[-len_copy:]))
+            
     eligibility_prev = np.ones(N_halos_prev,dtype=bool)
 
     # everyone is eligibile in first redshift
@@ -300,7 +309,7 @@ for i in range(ind_start,len(zs_mt)-1):
     halo_ind_in = correct_inds(halo_ind_in, N_halos_slabs_in,slabs_in,start=start_in,stop=stop_in,copies=copies_in)
     halo_ind_prev = correct_inds(halo_ind_prev, N_halos_slabs_prev,slabs_prev,start=start_prev,stop=stop_prev,copies=copies_prev)
 
-    # TESTING we only need this when loading incomplete merger trees because we're missing data
+    # TESTING REMOVE we only need this when loading incomplete merger trees because we're missing data
     mask_noinfo_in[main_prog_in > N_halos_prev] = False
     main_prog_in[main_prog_in > N_halos_prev] = 0
 
@@ -329,9 +338,10 @@ for i in range(ind_start,len(zs_mt)-1):
     eligibility_in_noinfo = eligibility_in[mask_noinfo_in]
 
     # select objects that are crossing the light cones
-    mask_lc_in_info = ((com_dist_in_info > chi_in) & (com_dist_prev_main_in_info <= chi_prev)) | ((com_dist_in_info <= chi_in) & (com_dist_prev_main_in_info > chi_prev))
-    mask_lc_in_noinfo = ((com_dist_in_noinfo >= chi_in - delta_chi_old/2.) & (com_dist_in_noinfo < chi_in + delta_chi/2.)) | (~eligibility_in_noinfo)
-    #mask_lc_in_noinfo = ((com_dist_in_noinfo >= chi_in) & (com_dist_in_noinfo < chi_prev)) | (~eligibility_in_noinfo)
+    #mask_lc_in_info = ((com_dist_in_info > chi_in) & (com_dist_prev_main_in_info <= chi_prev)) | ((com_dist_in_info <= chi_in) & (com_dist_prev_main_in_info > chi_prev))
+    mask_lc_in_info = ((com_dist_in_info > chi_in) & (com_dist_prev_main_in_info <= chi_prev)) | ((com_dist_in_info <= chi_in) & (com_dist_prev_main_in_info > chi_prev)) & (eligibility_in_info)# TESTING
+    #mask_lc_in_noinfo = ((com_dist_in_noinfo >= chi_in - delta_chi_old/2.) & (com_dist_in_noinfo < chi_in + delta_chi/2.)) | (~eligibility_in_noinfo)
+    mask_lc_in_noinfo = ((com_dist_in_noinfo >= chi_in - delta_chi_old/2.) & (com_dist_in_noinfo < chi_in + delta_chi/2.)) & (eligibility_in_noinfo)# TESTING # one for closer to prev and one for already has passed
 
     # percentage of objects that are part of this or previous snapshot
     print("masked no info crossing = ",np.sum(mask_lc_in_noinfo)/len(mask_lc_in_noinfo)*100.)
@@ -359,22 +369,73 @@ for i in range(ind_start,len(zs_mt)-1):
     pos_star_in_noinfo_lc = pos_in_noinfo_lc
     vel_star_in_noinfo_lc = pos_in_noinfo_lc*0.
 
+    '''
     # this is for those objects that are crossing light cone closer to previous redshift
     if i != ind_start:
         pos_star_in_noinfo_lc[~eligibility_in_noinfo_lc] = pos_star_next
         vel_star_in_noinfo_lc[~eligibility_in_noinfo_lc] = vel_star_next
         halo_ind_in_noinfo_lc[~eligibility_in_noinfo_lc] = halo_ind_next
-
+    '''
+    
     # get chi star where lc crosses halo trajectory; bool is False where closer to previous
     chi_star_in_info_lc, pos_star_in_info_lc, vel_star_in_info_lc, bool_star_in_info_lc = solve_crossing(com_dist_prev_main_in_info_lc,com_dist_in_info_lc,pos_prev_main_in_info_lc,pos_in_info_lc,chi_prev,chi_in)
     
     # add ineligible halos if any from last iteration of the loop to those crossed in previous
-    bool_star_in_info_lc = (bool_star_in_info_lc) | (~eligibility_in_info_lc)
+    # marked ineligible (False) only if same halo has already been assigned to a light cone
+    # for ~elig is True (assigned halos), bool is going to be true, so bool True if bad here
+    # ~bool is either not closer to this redshift (but prev) (False) or has already been assigned (False)
+    #bool_star_in_info_lc = (bool_star_in_info_lc) | (~eligibility_in_info_lc)
+    bool_elig_star_in_info_lc = (bool_star_in_info_lc) & (eligibility_in_info_lc)#TESTING
 
+    # number of objects in light cone
+    N_in_star_lc = np.sum(bool_elig_star_in_info_lc)
+    N_in_noinfo_lc = np.sum(mask_lc_in_noinfo)
+    N_lc = N_in_star_lc+N_in_noinfo_lc
+
+    print("with info and closer, noinfo, total = ",N_in_star_lc,N_in_noinfo_lc,N_lc,N_halos_in)
+
+    # start new arrays for final output (assuming it is in and not prev)
+    pos_interp_lc = np.zeros((N_lc,3))
+    vel_interp_lc = np.zeros((N_lc,3))
+    halo_ind_lc = np.zeros(N_lc,dtype=int)
+
+    # record interpolated position and velocity
+    pos_interp_lc[:N_in_star_lc] = pos_star_in_info_lc[bool_elig_star_in_info_lc]
+    vel_interp_lc[:N_in_star_lc] = vel_star_in_info_lc[bool_elig_star_in_info_lc]
+    halo_ind_lc[:N_in_star_lc] = halo_ind_in_info_lc[bool_elig_star_in_info_lc]
+    pos_interp_lc[N_in_star_lc:N_lc] = pos_star_in_noinfo_lc
+    vel_interp_lc[N_in_star_lc:N_lc] = vel_star_in_noinfo_lc
+    halo_ind_lc[N_in_star_lc:N_lc] = halo_ind_in_noinfo_lc
+
+    # create directory for this redshift
+    if not os.path.exists(os.path.join(cat_lc_dir,"z%.3f"%z_in)):
+        os.makedirs(os.path.join(cat_lc_dir,"z%.3f"%z_in))
+    
+    # adding contributions from the previous
+    if i != ind_start:
+        N_lc += len(halo_ind_next) # todo improve
+        pos_interp_lc = np.vstack((pos_interp_lc,pos_star_next))
+        vel_interp_lc = np.vstack((vel_interp_lc,vel_star_next))
+        halo_ind_lc = np.hstack((halo_ind_lc,halo_ind_next))
+
+    # save those arrays
+    table_lc = np.empty(N_lc,dtype=[('halo_ind',halo_ind_lc.dtype),('pos_interp',(pos_interp_lc.dtype,3)),('vel_interp',(vel_interp_lc.dtype,3))])
+    table_lc['halo_ind'] = halo_ind_lc
+    table_lc['pos_interp'] = pos_interp_lc
+    table_lc['vel_interp'] = vel_interp_lc
+    np.save(os.path.join(cat_lc_dir,"z%.3f"%z_in,'table_lc.npy'),table_lc)
+    
     # mark eligibility
-    # version 1: only the main progenitor is marked ineligible; ~bool is those that are crossed here and eligible
+    # version 1: only the main progenitor is marked ineligible; ~bool is closer to other
     halo_ind_next = halo_ind_prev_main_in_info_lc[~bool_star_in_info_lc]
     eligibility_prev[halo_ind_next] = False
+    # get rid of objects assigned now since closer to this # TESTING
+    halo_ind_assign = halo_ind_prev_main_in_info_lc[bool_star_in_info_lc]
+    eligibility_prev[halo_ind_assign] = False
+    # get rid of objects that have previously been assigned # TESTING
+    halo_ind_inelig = halo_ind_prev_main_in_info_lc[~eligibility_in_info_lc]
+    eligibility_prev[halo_ind_inelig] = False
+    
     # version 2: all progenitors are marked ineligible
     # slower, but works (perhaps optimize with numba). Confusing part is why halo_inds has zeros
     '''
@@ -389,42 +450,11 @@ for i in range(ind_start,len(zs_mt)-1):
         eligibility_prev[halo_inds] = False
     '''
 
-    # information to keep for next redshift considered
+    # information to keep for next redshift considered; should have dimensions equal to sum elig prev
     vel_star_next = vel_star_in_info_lc[~bool_star_in_info_lc]
     pos_star_next = pos_star_in_info_lc[~bool_star_in_info_lc]
 
-    # number of objects in light cone
-    N_in_star_lc = np.sum(bool_star_in_info_lc)
-    N_in_noinfo_lc = np.sum(mask_lc_in_noinfo)
-    N_lc = N_in_star_lc+N_in_noinfo_lc
-
-    print("with info and closer, noinfo, total = ",N_in_star_lc,N_in_noinfo_lc,N_lc,N_halos_in)
-
-    # start new arrays for final output (assuming it is in and not prev)
-    pos_interp_lc = np.zeros((N_lc,3))
-    vel_interp_lc = np.zeros((N_lc,3))
-    halo_ind_lc = np.zeros(N_lc,dtype=int)
-
-    # record interpolated position and velocity
-    pos_interp_lc[:N_in_star_lc] = pos_star_in_info_lc[bool_star_in_info_lc]
-    vel_interp_lc[:N_in_star_lc] = vel_star_in_info_lc[bool_star_in_info_lc]
-    halo_ind_lc[:N_in_star_lc] = halo_ind_in_info_lc[bool_star_in_info_lc]
-    pos_interp_lc[N_in_star_lc:N_lc] = pos_star_in_noinfo_lc
-    vel_interp_lc[N_in_star_lc:N_lc] = vel_star_in_noinfo_lc
-    halo_ind_lc[N_in_star_lc:N_lc] = halo_ind_in_noinfo_lc
-
-    # create directory for this redshift
-    if not os.path.exists(os.path.join(cat_lc_dir,"z%.3f"%z_in)):
-        os.makedirs(os.path.join(cat_lc_dir,"z%.3f"%z_in))
-
-    # save those arrays
-    table_lc = np.empty(N_lc,dtype=[('halo_ind',halo_ind_lc.dtype),('pos_interp',pos_interp_lc.dtype),('vel_interp',vel_interp_lc.dtype)])
-    table_lc['halo_ind'] = halo_ind_lc
-    table_lc['pos_interp'] = pos_interp_lc
-    table_lc['vel_interp'] = vel_interp_lc
-    np.save(os.path.join(cat_lc_dir,"z%.3f"%z_in,'table_lc.npy'),table_lc)
-
-    if want_plot:
+    if want_plot and i != ind_start:
         # select the halos in the light cones
         pos_choice = pos_in[halo_ind_lc]
 
@@ -458,5 +488,6 @@ for i in range(ind_start,len(zs_mt)-1):
 
     gc.collect()
     delta_chi_old = delta_chi
-        
+    eligibility_in = eligibility_prev
+    copies_old = copies_prev
 #dict_keys(['HaloIndex', 'HaloMass', 'HaloVmax', 'IsAssociated', 'IsPotentialSplit', 'MainProgenitor', 'MainProgenitorFrac', 'MainProgenitorPrec', 'MainProgenitorPrecFrac', 'NumProgenitors', 'Position', 'Progenitors'])
