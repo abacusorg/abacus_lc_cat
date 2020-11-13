@@ -49,7 +49,7 @@ merger_dir = "/mnt/store2/bigsims/merger/"+sim_name+"/"
 zs_mt = np.load("data/zs_mt.npy")
 
 # fields are we extracting from the catalogs
-fields_cat = ['id','npstartA','npoutA','N','x_L2com','v_L2com']
+fields_cat = ['id','npstartA','npoutA','N','x_L2com','v_L2com']#sigmav3d
 
 def extract_redshift(fn):
     red = float(fn.split('z')[-1][:5])
@@ -61,33 +61,34 @@ print(zs_cat)
 
 # initial redshift where we start building the trees
 z_start = 0.5
-#z_start = np.min(zs_mt)
+z_stop = 0.8
 ind_start = np.argmin(np.abs(zs_mt-z_start))
+ind_stop = np.argmin(np.abs(zs_mt-z_stop))
 
 # loop over each merger tree redshift
-for i in range(ind_start,len(zs_mt)-1):
+for i in range(ind_start,ind_stop):
 
     # starting snapshot
     z_in = zs_mt[i]
     z_cat = zs_cat[np.argmin(np.abs(z_in-zs_cat))]
     print("Redshift = %.3f %.3f"%(z_in,z_cat))
-
-    # TESTING todo: remove
-    if z_in >= 0.8: break
     
     # load the light cone arrays
     table_lc = np.load(os.path.join(cat_lc_dir,"z%.3f"%z_in,'table_lc.npy'))
     halo_ind_lc = table_lc['halo_ind']
     pos_interp_lc = table_lc['pos_interp']
     vel_interp_lc = table_lc['vel_interp']
-
+    
     # catalog directory
-    #catdir = os.path.join(cat_dir,"z%.3f"%z_in,'halo_info','halo_info_%03d.asdf'%(i_chunk))
     catdir = os.path.join(cat_dir,"z%.3f"%z_cat)
     
     # load halo catalog, setting unpack to False for speed
     cat = CompaSOHaloCatalog(catdir, load_subsamples='A_halo_pid', fields=fields_cat, unpack_bits = False)
     
+    # TESTING
+    # in the event where we have more than one copies of the box, need to make sure that halo index is still within N_halo
+    halo_ind_lc %= len(cat.halos)
+
     # halo catalog
     halo_table = cat.halos[halo_ind_lc]
     header = cat.header
@@ -120,8 +121,6 @@ for i in range(ind_start,len(zs_mt)-1):
     halo_table['vel_interp'] = vel_interp_lc
 
     # save to files
-    #save_asdf(halo_table,"halo_info_lc",header,cat_lc_dir,z_in,i_chunk)
-    #save_asdf(pid_table,"pid_lc",header,cat_lc_dir,z_in,i_chunk)
     save_asdf(halo_table,"halo_info_lc",header,cat_lc_dir,z_in)
     save_asdf(pid_table,"pid_lc",header,cat_lc_dir,z_in)
 

@@ -205,14 +205,16 @@ z1 = z_of_chi(0.5*Lbox-origin[0])
 z2 = z_of_chi((0.5*Lbox-origin[0])*np.sqrt(3))
 
 # initial redshift where we start building the trees
-z_start = 0.5#0.8#0.5
+z_start = 0.4#0.8#0.5
+z_stop = 0.5#0.8#0.5
 #z_start = np.min(zs_mt)
 ind_start = np.argmin(np.abs(zs_mt-z_start))
+ind_stop = np.argmin(np.abs(zs_mt-z_stop))#len(zs_mt)-1
 # initialize difference between the conformal time of last two shells
 delta_chi_old = 0.
 
 # loop over each merger tree redshift
-for i in range(ind_start,len(zs_mt)-1):
+for i in range(ind_start,ind_stop+1):
 
     # starting snapshot
     z_in = zs_mt[i]
@@ -310,8 +312,8 @@ for i in range(ind_start,len(zs_mt)-1):
     halo_ind_prev = correct_inds(halo_ind_prev, N_halos_slabs_prev,slabs_prev,start=start_prev,stop=stop_prev,copies=copies_prev)
 
     # TESTING REMOVE we only need this when loading incomplete merger trees because we're missing data
-    mask_noinfo_in[main_prog_in > N_halos_prev] = False
-    main_prog_in[main_prog_in > N_halos_prev] = 0
+    #mask_noinfo_in[main_prog_in > N_halos_prev] = False
+    #main_prog_in[main_prog_in > N_halos_prev] = 0
 
     # positions and comoving distances of main progenitor halos corresponding to the halos in current snapshot
     pos_prev_main_in = pos_prev[main_prog_in]

@@ -62,7 +62,7 @@ lc_rv_fns = sorted(glob.glob(os.path.join(lc_dir, 'rv/LightCone*')))
 lc_pid_fns = sorted(glob.glob(os.path.join(lc_dir, 'pid/LightCone*')))
 
 # select the final and initial step for computing the convergence map
-step_start = steps_all[np.argmin(np.abs(zs_all-z_highest))]
+step_start = 724 #TESTINGsteps_all[np.argmin(np.abs(zs_all-z_highest))]
 step_stop = steps_all[np.argmin(np.abs(zs_all-z_lowest))]
 print("step_start = ",step_start)
 print("step_stop = ",step_stop)
@@ -76,18 +76,6 @@ def get_mt_fns(z_th):
     z_high = zs_mt[k+1]
     fn_low = cat_lc_dir+"z%.3f/pid_lc_z%.3f.asdf"%(z_low,z_low)
     fn_high = cat_lc_dir+"z%.3f/pid_lc_z%.3f.asdf"%(z_high,z_high)
-
-    '''
-    if z_low < z_lowest:# TESTING
-        mt_fns = [fn_high]
-        mt_zs = [z_high]
-    elif z_high > z_highest:
-        mt_fns = [fn_low]
-        mt_zs = [z_low]
-    else:
-        mt_fns = [fn_low,fn_high]
-        mt_zs = [z_low,z_high]
-    '''
     
     mt_fns = [fn_high, fn_low]
     mt_zs = [z_high, z_low]
@@ -122,9 +110,10 @@ for step in range(step_start,step_stop+1):
 
     # is this the redshift that's closest to the bridge between two redshifts 
     mid_point = np.argmin(np.abs(mt_z_mean-zs_all)) == j
-    if not mid_point: 
-        mt_zs = [mt_zs[np.argmin(np.abs(mt_zs-z_this))]]
-        mt_fns = [mt_fns[np.argmin(np.abs(mt_zs-z_this))]]
+    if not mid_point:
+        mt_fns = [mt_fns[np.argmin(np.abs(mt_zs-z_this))]] 
+        mt_zs = [mt_zs[np.argmin(np.abs(mt_zs-z_this))]] 
+        
     print("mt_zs = ",mt_zs)
     
     # find all light cone file names that correspond to this time step
@@ -179,7 +168,7 @@ for step in range(step_start,step_stop+1):
         # loop over the (1-2) closest catalogs 
         for i in range(len(mt_fns)):
             if mt_fns[i] != mt_fn_prev:
-                # if not initial redshift, close the file
+                # if not initial redshift, close the previous file
                 if mt_fn_prev != "":
                     save_asdf(lc_table_final,"pid_rv_lc",header,cat_lc_dir,mt_z_prev)
                     print("just closed previous redshift = ",mt_z_prev)
@@ -192,19 +181,35 @@ for step in range(step_start,step_stop+1):
                 del lagr_pos, tagged, density
                 header = mt_pids['header']
                 mt_pids.close()
-            
+                
+                # start the light cones table for this redshift
+                # TESTING
+                lc_table_final = np.empty(len(mt_pid),dtype=[('pid',mt_pid.dtype),('pos',(np.float32,3)),('vel',(np.float32,3)),('redshift',np.float32)])
+                
             # actual galaxies in light cone
             pid_mt_lc, comm1, comm2 = np.intersect1d(mt_pid,lc_pid_combo,return_indices=True)
+            # select the intersected positions
             pos_mt_lc, vel_mt_lc = unpack_rvint(lc_rv_combo[comm2],Lbox)
             
             print("matched = ",len(comm1)*100./(len(mt_pid)))
-
+            
             mt_fn_prev = mt_fns[i]
             mt_z_prev = mt_zs[i]
+
+            print("mt_fn_prev = ",mt_fn_prev)
+            print("mt_z_prev = ",mt_z_prev)
             
             # offset depending on which light cone we are at
             pos_mt_lc += offset_lc
+
+            # TESTING
+            lc_table_final['pid'][comm1] = pid_mt_lc
+            lc_table_final['pos'][comm1] = pos_mt_lc
+            lc_table_final['vel'][comm1] = vel_mt_lc
+            lc_table_final['redshift'][comm1] = np.ones(len(pid_mt_lc))*z_this
             
+            '''
+            # og
             # attach the new position and velocity and redshift from which taken
             lc_table = np.empty(len(pid_mt_lc),dtype=[('pid',pid_mt_lc.dtype),('pos',(pos_mt_lc.dtype,3)),('vel',(vel_mt_lc.dtype,3)),('redshift',np.float32)])
             lc_table['pid'] = pid_mt_lc
@@ -218,6 +223,7 @@ for step in range(step_start,step_stop+1):
             except:
                 lc_table_final = lc_table
                 print("exception -- should only get it when loading a new catalog")
-
+            '''
+            
         print("-------------------")
             # todo: delete aux and rename pid to pid_rv_lc and get rid of the redshift value
