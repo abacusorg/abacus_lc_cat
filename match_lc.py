@@ -20,12 +20,12 @@ c = 299792.458# km/s
 # simulation parameters
 Lbox = 2000. # Mpc/h
 PPD = 6912
-NP = PPD**3
+
 
 # initial redshift where we start building the trees
-# aiming to get these: 0.575, 0.65, 0.725, # TESTING
-z_lowest = 0.575 # 0.5
-z_highest = 0.725 # 0.8 # 2.45 # including
+# aiming to get these: 0.575, 0.65, 0.725,
+z_lowest = 0.5 # 0.5
+z_highest = 1.179 # 0.8 # 2.45 # including
 
 # location of the origin in Mpc/h
 origin = np.array([-990.,-990.,-990.])
@@ -62,7 +62,7 @@ lc_rv_fns = sorted(glob.glob(os.path.join(lc_dir, 'rv/LightCone*')))
 lc_pid_fns = sorted(glob.glob(os.path.join(lc_dir, 'pid/LightCone*')))
 
 # select the final and initial step for computing the convergence map
-step_start = 724 #TESTINGsteps_all[np.argmin(np.abs(zs_all-z_highest))]
+step_start = steps_all[np.argmin(np.abs(zs_all-z_highest))]
 step_stop = steps_all[np.argmin(np.abs(zs_all-z_lowest))]
 print("step_start = ",step_start)
 print("step_stop = ",step_stop)
@@ -74,8 +74,8 @@ def get_mt_fns(z_th):
         if squish == True: break 
     z_low = zs_mt[k]
     z_high = zs_mt[k+1]
-    fn_low = cat_lc_dir+"z%.3f/pid_lc_z%.3f.asdf"%(z_low,z_low)
-    fn_high = cat_lc_dir+"z%.3f/pid_lc_z%.3f.asdf"%(z_high,z_high)
+    fn_low = cat_lc_dir+"z%.3f/pid_lc.asdf"%(z_low)
+    fn_high = cat_lc_dir+"z%.3f/pid_lc.asdf"%(z_high)
     
     mt_fns = [fn_high, fn_low]
     mt_zs = [z_high, z_low]
@@ -138,15 +138,6 @@ for step in range(step_start,step_stop+1):
         lc_rv = lc_rvs['data']['rvint'][:]
         lc_rvs.close()
 
-        # todo problem TESTING
-        '''
-        try:
-            lc_pid_combo = np.hstack((lc_pid_combo,lc_pid))
-            lc_rv_combo = np.hstack((lc_rv_combo,lc_rv))
-        except:
-            lc_pid_combo = lc_pid
-            lc_rv_combo = lc_rv
-        '''
         lc_pid_combo = lc_pid
         lc_rv_combo = lc_rv
 
@@ -183,7 +174,6 @@ for step in range(step_start,step_stop+1):
                 mt_pids.close()
                 
                 # start the light cones table for this redshift
-                # TESTING
                 lc_table_final = np.empty(len(mt_pid),dtype=[('pid',mt_pid.dtype),('pos',(np.float32,3)),('vel',(np.float32,3)),('redshift',np.float32)])
                 
             # actual galaxies in light cone
@@ -202,28 +192,11 @@ for step in range(step_start,step_stop+1):
             # offset depending on which light cone we are at
             pos_mt_lc += offset_lc
 
-            # TESTING
+            # save the pid, position, velocity and redshift
             lc_table_final['pid'][comm1] = pid_mt_lc
             lc_table_final['pos'][comm1] = pos_mt_lc
             lc_table_final['vel'][comm1] = vel_mt_lc
             lc_table_final['redshift'][comm1] = np.ones(len(pid_mt_lc))*z_this
-            
-            '''
-            # og
-            # attach the new position and velocity and redshift from which taken
-            lc_table = np.empty(len(pid_mt_lc),dtype=[('pid',pid_mt_lc.dtype),('pos',(pos_mt_lc.dtype,3)),('vel',(vel_mt_lc.dtype,3)),('redshift',np.float32)])
-            lc_table['pid'] = pid_mt_lc
-            lc_table['pos'] = pos_mt_lc
-            lc_table['vel'] = vel_mt_lc
-            lc_table['redshift'] = np.ones(len(pid_mt_lc),dtype=pid_mt_lc.dtype)*z_this
-
-            try:
-                lc_table_final = np.hstack((lc_table_final,lc_table))
-                print("stacked")
-            except:
-                lc_table_final = lc_table
-                print("exception -- should only get it when loading a new catalog")
-            '''
             
         print("-------------------")
             # todo: delete aux and rename pid to pid_rv_lc and get rid of the redshift value

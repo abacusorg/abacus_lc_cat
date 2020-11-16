@@ -14,42 +14,29 @@ from tools.aid_asdf import save_asdf
 
 # TODO: copy halo info (just get rid of fields=fields_cat);  velocity interpolation (could be done when velocities are summoned, maybe don't interpolate); delete things properly; read parameters from header;
 
-# cosmological parameters
-h = 0.6736
-H0 = h*100.# km/s/Mpc
-Om_m = 0.315192
-c = 299792.458# km/s
-
-# simulation parameters
-Lbox = 2000. # Mpc/h
-PPD = 6912
-NP = PPD**3
-
 # want to show plots
-want_plot = True
+want_plot = False
 
 # location of the origin in Mpc/h
 origin = np.array([-990.,-990.,-990.])
 
 # simulation name
 sim_name = "AbacusSummit_base_c000_ph006"
+#sim_name = "AbacusSummit_highbase_c000_ph100"
 
 # directory where the halo catalogs are saved
 #cat_dir = "/mnt/store/lgarrison/"+sim_name+"/halos/"
 cat_dir = "/mnt/store2/bigsims/"+sim_name+"/halos/"
+#cat_dir = "/mnt/gosling2/bigsims/"+sim_name+"/halos/"
 
 # directory where we save the final outputs
 cat_lc_dir = "/mnt/gosling1/boryanah/light_cone_catalog/"+sim_name+"/halos_light_cones/"
-
-# directory where the merger tree is stored
-#merger_dir = "/mnt/store/AbacusSummit/merger/"+sim_name+"/"
-merger_dir = "/mnt/store2/bigsims/merger/"+sim_name+"/"
 
 # all merger tree redshifts
 zs_mt = np.load("data/zs_mt.npy")
 
 # fields are we extracting from the catalogs
-fields_cat = ['id','npstartA','npoutA','N','x_L2com','v_L2com']#sigmav3d
+fields_cat = ['id','npstartA','npoutA','N','x_L2com','v_L2com','sigmav3d_L2com']
 
 def extract_redshift(fn):
     red = float(fn.split('z')[-1][:5])
@@ -60,13 +47,13 @@ zs_cat = [extract_redshift(redshifts[i]) for i in range(len(redshifts))]
 print(zs_cat)
 
 # initial redshift where we start building the trees
-z_start = 0.5
-z_stop = 0.8
+z_start = 0.45
+z_stop = 1.25
 ind_start = np.argmin(np.abs(zs_mt-z_start))
 ind_stop = np.argmin(np.abs(zs_mt-z_stop))
 
 # loop over each merger tree redshift
-for i in range(ind_start,ind_stop):
+for i in range(ind_start,ind_stop+1):
 
     # starting snapshot
     z_in = zs_mt[i]
@@ -85,7 +72,6 @@ for i in range(ind_start,ind_stop):
     # load halo catalog, setting unpack to False for speed
     cat = CompaSOHaloCatalog(catdir, load_subsamples='A_halo_pid', fields=fields_cat, unpack_bits = False)
     
-    # TESTING
     # in the event where we have more than one copies of the box, need to make sure that halo index is still within N_halo
     halo_ind_lc %= len(cat.halos)
 
@@ -122,6 +108,8 @@ for i in range(ind_start,ind_stop):
 
     # save to files
     save_asdf(halo_table,"halo_info_lc",header,cat_lc_dir,z_in)
+    #save_asdf(pid_table,"pid_rv_lc",header,cat_lc_dir,z_in)
+    # TESTING
     save_asdf(pid_table,"pid_lc",header,cat_lc_dir,z_in)
 
     # delete things at the end
