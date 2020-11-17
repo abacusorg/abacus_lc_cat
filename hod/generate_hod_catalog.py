@@ -138,7 +138,7 @@ def gen_cent(halo_ids, halo_pos, halo_vels, halo_vrms, halo_mass, design_array, 
     -------
 
     For each halo, if there exists a central, the function outputs the 
-    3D position (Mpc), halo ID, and halo mass (Msun) to file.
+    3D position (Mpc/h), halo ID, and halo mass (Msun/h) to file.
 
     """
 
@@ -238,7 +238,7 @@ def gen_sats(halo_ids, halo_pos, halo_vels, halo_mass, halo_pstart, halo_pnum, p
     -------
 
     For each halo, the function returns the satellite galaxies, specifically
-    the 3D position (Mpc), velocities, halo ID, and halo mass (Msun)
+    the 3D position (Mpc/h), velocities, halo ID, and halo mass (Msun/h)
 
 
     """
@@ -264,7 +264,7 @@ def gen_sats(halo_ids, halo_pos, halo_vels, halo_mass, halo_pstart, halo_pnum, p
             continue
 
         # extract the particle positions and vels
-        ss_pos = part_pos[start_ind: start_ind + numparts] # Mpc
+        ss_pos = part_pos[start_ind: start_ind + numparts] # Mpc/h
         ss_vels = part_vel[start_ind: start_ind + numparts] # km/s
         ss_pids = part_pid[start_ind: start_ind + numparts] # integer
 
@@ -362,6 +362,12 @@ def gen_gals(directory, design, fcent, fsats, rsd, params, m_cutoff = 4e12, what
     global design_array
     design_array = np.array([M_cut, M1, sigma, alpha, kappa])
 
+    # box size
+    lbox = params['Lbox']
+
+    # z coordinate to velocity
+    velz2kms = params['velz2kms']
+    
     # loop over all the halos files and pull out the relevant data fields 
     files = glob(os.path.join(directory,'halo_info_lc*.asdf'))   
     num_files = len(files)
@@ -370,22 +376,18 @@ def gen_gals(directory, design, fcent, fsats, rsd, params, m_cutoff = 4e12, what
     for i in np.arange(num_files):
 
         # open the halo files
-        '''
-        newfile = h5py.File(os.path.join(directory,'halos_0_mcut.'+str(i)+'.h5'), 'r')
-        halos = newfile['halos']
-        '''
         halos = asdf.open(files[i])
         maskedhalos = halos['data']
         
         # extracting the halo properties that we need
         halo_ids = maskedhalos['id'][:] # halo IDs
-        #halo_pos = maskedhalos['x_L2com']/params['h'] # halo positions, Mpc
-        halo_pos = maskedhalos['pos_interp'][:]/params['h'] # halo positions, Mpc
+        #halo_pos = maskedhalos['x_L2com'] # halo positions, Mpc/h
+        halo_pos = maskedhalos['pos_interp'][:]+lbox/2. # halo positions, Mpc/h
         #halo_vels = maskedhalos['v_L2com'] # halo velocities, km/s
         halo_vels = maskedhalos['vel_interp'][:] # halo velocities, km/s
         #halo_vrms = maskedhalos['sigmav3d_L2com'] # TODO TESTING FIXME # halo velocity dispersions, km/s
         halo_vrms = np.ones(halo_vels.shape[0])*.0003 # TODO TESTING FIXME # halo velocity dispersions, km/s
-        halo_mass = maskedhalos['N'][:]*params['Mpart'] # halo mass, Msun
+        halo_mass = maskedhalos['N'][:]*params['Mpart'] # halo mass, Msun/h
         halo_pstart = maskedhalos['npstartA'][:] # starting index of particles
         halo_pnum = maskedhalos['npoutA'][:] # number of particles
         halo_multi = np.ones(len(halo_pnum))
@@ -393,21 +395,15 @@ def gen_gals(directory, design, fcent, fsats, rsd, params, m_cutoff = 4e12, what
         #halo_multi = maskedhalos['multi_halos'] # tuks no need 
         #halo_submask = maskedhalos['mask_subsample']  #tuks no need
 
-        velz2kms = params['velz2kms']
-        lbox = params['Lbox']
         # for each halo, generate central galaxies and output to file
         gen_cent(halo_ids, halo_pos, halo_vels, halo_vrms, halo_mass, 
                  design_array, rsd, fcent, velz2kms, lbox, m_cutoff = m_cutoff, whatseed = whatseed)
 
-        # open particle file tuks
-        '''
-        newpart = h5py.File(directory+'/particles_0_subsample_ranked_full.'+str(i)+'.h5', 'r')
-        subsample = newpart['particles']
-        '''
+        # open particle file
         particles = asdf.open(os.path.join(directory,'pid_rv_lc.asdf'))
         subsample = particles['data']
-        part_pos = subsample['pos'][:] / params['h']
-        part_vel = subsample['vel'][:]
+        part_pos = subsample['pos'][:]+lbox/2. # Mpc/h
+        part_vel = subsample['vel'][:] # km/s
         if want_pid:
             part_pid = subsample['pid'][:]
         else:
@@ -427,8 +423,7 @@ def gen_gals(directory, design, fcent, fsats, rsd, params, m_cutoff = 4e12, what
         particles.close()
 
 
-def gen_gal_cat(design, params, savedir, m_cutoff = 4e12,
-                whatseed = 0, rsd = True, verbose = False, want_pid = False):
+def gen_gal_cat(design, params, whatseed = 0):
     """
     Main interface that takes in the simulation number, HOD design and 
     and outputs the resulting central and satellite galaxy
@@ -443,41 +438,29 @@ def gen_gal_cat(design, params, savedir, m_cutoff = 4e12,
     params : dict
         Dictionary of various simulation parameters. 
 
-    savedir : string
-        Where do you wanna save the outputs
-
-    m_cutoff: float, optional
-        Ignore halos smaller than this mass.
-
     whatseed : integer, optional
         The initial seed to the random number generator. 
 
-    rsd : boolean, optional
-        Flag of whether to implement RSD. 
-
-    verbose : boolean, optional
-        Flag to print extra information regardin completing the runs
-
     """
 
-    if not type(rsd) is bool:
+    if not type(params['rsd']) is bool:
         print("Error: rsd has to be a boolean.")
 
     # directory where the subsamples are stored #tuks
     subsample_directory = params['subsample_directory']
     
     # if this directory does not exist, create it
-    if not os.path.exists(savedir):
-        os.makedirs(savedir)
+    if not os.path.exists(params['savedir']):
+        os.makedirs(params['savedir'])
 
     # binary output galaxy catalog
-    if verbose:
+    if params['verbose']:
         print("Building galaxy catalog (binary output)")
-    fcent = open(os.path.join(savedir,"halos_gal_cent"),'wb')
-    fsats = open(os.path.join(savedir,"halos_gal_sats"),'wb')
+    fcent = open(os.path.join(params['savedir'],"halos_gal_cent"),'wb')
+    fsats = open(os.path.join(params['savedir'],"halos_gal_sats"),'wb')
 
     # find the halos, populate them with galaxies and write them to files
-    gen_gals(subsample_directory, design, fcent, fsats, rsd, params, m_cutoff = m_cutoff, whatseed = whatseed, want_pid = want_pid)
+    gen_gals(subsample_directory, design, fcent, fsats, params['rsd'], params, m_cutoff = params['m_cutoff'], whatseed = whatseed, want_pid = params['want_pid'])
 
     # close the files in the end
     fcent.close()
