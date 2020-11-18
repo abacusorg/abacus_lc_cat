@@ -8,7 +8,7 @@ import time
 import gc
 import os
 
-from tools.aid_asdf import save_asdf
+from tools.aid_asdf import save_asdf, load_mt_pid, load_lc_pid_rv
 from bitpacked import unpack_rvint, unpack_pids
     
 # cosmological parameters
@@ -58,9 +58,7 @@ step_max = np.max(steps_all)
 chi_of_z = interp1d(zs_all,chis_all)
 z_of_chi = interp1d(chis_all,zs_all)
 
-# conformal distance
-print(np.min(zs_all),np.min(zs_mt))
-print(np.max(zs_all),np.max(zs_mt))
+# conformal distance of the mtree catalogs
 chis_mt = chi_of_z(zs_mt)
 
 # Read light cone file names
@@ -102,10 +100,12 @@ for i in range(len(lc_pid_fns)):
     step_fns[i] = extract_steps(lc_pid_fns[i])
 
 # initialize previously loaded mt file name
-mt_fn_prev = ""
-# TESTING
+currently_loaded_zs = []
+currently_loaded_headers = []
+currently_loaded_pids = []
+currently_loaded_tables = []
 for step in range(step_start,step_stop+1):
-    #for step in range(600,602):
+    #TESTINGfor step in range(600,602):
     # this is because our arrays start correspond to step numbers: step_start, step_start+1, step_start+2 ... step_stop
     j = step-step_min
     step_this = steps_all[j]
@@ -113,90 +113,93 @@ for step in range(step_start,step_stop+1):
     chi_this = chis_all[j]
     
     assert step_this == step, "You've messed up the counts"
-    print("step, redshift = ",step_this, z_this)
+    print("light cones step, redshift = ",step_this, z_this)
 
-    # get the two redshifts it's straddling
+    # get the two redshifts it's straddling and the mean chi
     mt_fns, mt_zs, mt_chis = get_mt_fns(z_this)
-    mt_chi_mean = np.mean(mt_chis)
 
+    # get the mean chi
+    mt_chi_mean = np.mean(mt_chis)
+    
+    # how many shells are we including on both sides, including mid point (total of 2j+1)
+    buffer_no = 2
+    
     # is this the redshift that's closest to the bridge between two redshifts 
-    mid_point = np.argmin(np.abs(mt_chi_mean-chis_all)) == j
-    if not mid_point:
+    mid_bool = (np.argmin(np.abs(mt_chi_mean-chis_all)) <= j+buffer_no) & (np.argmin(np.abs(mt_chi_mean-chis_all)) >= j-buffer_no)
+
+    # if not in between two redshifts, we just need one catalog -- the one it is closest to
+    if not mid_bool:
         mt_fns = [mt_fns[np.argmin(np.abs(mt_chis-chi_this))]] 
-        mt_chis = [mt_chis[np.argmin(np.abs(mt_chis-chi_this))]]
         mt_zs = [mt_zs[np.argmin(np.abs(mt_chis-chi_this))]] 
 
-    # TESTING perhaps have a dictionary this and prev
+    # load this and prev
+    for i in range(len(mt_fns)):
+        # check if catalog already loaded
+        if mt_zs[i] in currently_loaded_zs: print("skipped loading catalog ",mt_zs[i]); continue
+               
+        # discard the old redshift catalog and record its data
+        if len(currently_loaded_zs) >= 2:
+
+            # save the information about that redshift
+            save_asdf(currently_loaded_tables[0],"pid_rv_lc",currently_loaded_headers[0],cat_lc_dir,currently_loaded_zs[0])
+            print("saved catalog = ",currently_loaded_zs[0])
+            
+            # discard it from currently loaded
+            currently_loaded_zs = currently_loaded_zs[1:]
+            currently_loaded_headers = currently_loaded_headers[1:]
+            currently_loaded_pids = currently_loaded_pids[1:]
+            currently_loaded_tables = currently_loaded_tables[1:]
+
+        # load new merger tree catalog
+        mt_pid, header = load_mt_pid(mt_fns[i],Lbox,PPD)
+        
+        # start the light cones table for this redshift
+        lc_table_final = np.empty(len(mt_pid),dtype=[('pid',mt_pid.dtype),('pos',(np.float32,3)),\
+                                                     ('vel',(np.float32,3)),('redshift',np.float32)])
+        
+        # append the newly loaded catalog
+        currently_loaded_zs.append(mt_zs[i])
+        currently_loaded_headers.append(header)
+        currently_loaded_pids.append(mt_pid)
+        currently_loaded_tables.append(lc_table_final)
+
+    print("currently loaded redshifts = ",currently_loaded_zs)    
     print("using redshifts = ",mt_zs)
+
     # find all light cone file names that correspond to this time step
     choice_fns = np.where(step_fns == step_this)[0]
     # number of light cones at this step
     num_lc = len(choice_fns)
     assert (num_lc <= 3) & (num_lc > 0), "There can be at most three files in the light cones corresponding to a given step"
     
-    # loop through those 1-3 light cone files
+    # loop through those one to three light cone files
     for i_choice, choice_fn in enumerate(choice_fns):
         print("light cones file = ",lc_pid_fns[choice_fn])
 
-        # particles in light cone
-        lc_pids = asdf.open(lc_pid_fns[choice_fn], lazy_load=True, copy_arrays=True)
-        lc_pid = lc_pids['data']['packedpid'][:]
-        lc_pid, lagr_pos, tagged, density = unpack_pids(lc_pid,Lbox,PPD)
-        del lagr_pos, tagged, density
-        lc_pids.close()
+        # load particles in light cone
+        lc_pid, lc_rv = load_lc_pid_rv(lc_pid_fns[choice_fn],lc_rv_fns[choice_fn],Lbox,PPD)
+        
+        if 'LightCone1' in lc_pid_fns[choice_fn]:
+            offset_lc = np.array([0.,0.,Lbox])
+        elif 'LightCone2' in lc_pid_fns[choice_fn]:
+            offset_lc = np.array([0.,Lbox,0.])
+        else: offset_lc = np.array([0.,0.,0.])
 
-        # load positions and velocities
-        lc_rvs = asdf.open(lc_rv_fns[choice_fn], lazy_load=True, copy_arrays=True)
-        lc_rv = lc_rvs['data']['rvint'][:]
-        lc_rvs.close()
-
-        if num_lc == 2:
-            if i_choice == 0:
-                offset_lc = np.array([0.,0.,2000.])
-            elif i_choice == 1:
-                offset_lc = np.array([0.,2000.,0.])
-        elif num_lc == 3:
-            if i_choice == 0:
-                offset_lc = np.array([0.,0.,2000.])
-            elif i_choice == 2:
-                offset_lc = np.array([0.,2000.,0.])
-            else:
-                offset_lc = np.array([0.,0.,0.])
-        else:
-            offset_lc = np.array([0.,0.,0.])
-                
-        # loop over the (1-2) closest catalogs 
+        # loop over the one or two closest catalogs 
         for i in range(len(mt_fns)):
-            if mt_fns[i] != mt_fn_prev:
-                # if not initial redshift, close the previous file
-                if mt_fn_prev != "":
-                    # TESTING
-                    save_asdf(lc_table_final,"pid_rv_lc",header,cat_lc_dir,mt_z_prev)
-                    print("closed redshift = ",mt_z_prev)
-                    del lc_table_final
-                # load new catalog
-                print("open redshift = ",mt_fns[i])
-                mt_pids = asdf.open(mt_fns[i], lazy_load=True, copy_arrays=True)
-                mt_pid = mt_pids['data']['pid'][:]
-                mt_pid, lagr_pos, tagged, density = unpack_pids(mt_pid,Lbox,PPD) 
-                del lagr_pos, tagged, density
-                header = mt_pids['header']
-                mt_pids.close()
-                
-                # start the light cones table for this redshift
-                lc_table_final = np.empty(len(mt_pid),dtype=[('pid',mt_pid.dtype),('pos',(np.float32,3)),('vel',(np.float32,3)),('redshift',np.float32)])
-                
+            which_mt = np.where(mt_zs[i] == currently_loaded_zs)[0]
+            mt_pid = currently_loaded_pids[which_mt[0]]
+            header = currently_loaded_headers[which_mt[0]]
+            lc_table_final = currently_loaded_tables[which_mt[0]]
+            mt_z = currently_loaded_zs[which_mt[0]]
+            
             # actual galaxies in light cone
             pid_mt_lc, comm1, comm2 = np.intersect1d(mt_pid,lc_pid,return_indices=True)
             # select the intersected positions
             pos_mt_lc, vel_mt_lc = unpack_rvint(lc_rv[comm2],Lbox)
             
-            print("matched = ",len(comm1)*100./(len(mt_pid)))
-            
-            mt_fn_prev = mt_fns[i]
-            mt_z_prev = mt_zs[i]
-
-            print("mt_fn_prev = ",mt_fn_prev)
+            # print percentage of matched pids
+            print("at z = %.3f, matched = "%mt_z,len(comm1)*100./(len(mt_pid)))
             
             # offset depending on which light cone we are at
             pos_mt_lc += offset_lc
@@ -208,10 +211,8 @@ for step in range(step_start,step_stop+1):
             lc_table_final['redshift'][comm1] = np.ones(len(pid_mt_lc))*z_this
             
         print("-------------------")
-            # todo: delete aux and rename pid to pid_rv_lc and get rid of the redshift value
 
-# close the file that was open to write in
-# TESTING
-save_asdf(lc_table_final,"pid_rv_lc",header,cat_lc_dir,mt_z_prev)
-print("closed redshift = ",mt_z_prev)
+# close the file that was open to write in # what is this tuks
+save_asdf(lc_table_final,"pid_rv_lc",header,cat_lc_dir,mt_z)
+print("closed redshift = ",mt_z)
 del lc_table_final
