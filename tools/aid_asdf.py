@@ -1,6 +1,47 @@
 import asdf
 import numpy as np
 import os
+from numba import jit
+from bitpacked import unpack_rvint, unpack_pids
+
+def load_lc_pid_rv(lc_pid_fn, lc_rv_fn, Lbox, PPD):
+    # load and unpack pids
+    lc_pids = asdf.open(lc_pid_fn, lazy_load=True, copy_arrays=True)
+    lc_pid = lc_pids['data']['packedpid'][:]
+    lc_pid, lagr_pos, tagged, density = unpack_pids(lc_pid,Lbox,PPD)
+    del lagr_pos, tagged, density
+    lc_pids.close()
+
+    # load positions and velocities
+    lc_rvs = asdf.open(lc_rv_fn, lazy_load=True, copy_arrays=True)
+    lc_rv = lc_rvs['data']['rvint'][:]
+    lc_rvs.close()
+    return lc_pid, lc_rv
+
+def load_mt_pid(mt_fn,Lbox,PPD):
+    # load mtree catalog
+    print("load mtree file = ",mt_fn)
+    mt_pids = asdf.open(mt_fn, lazy_load=True, copy_arrays=True)
+    mt_pid = mt_pids['data']['pid'][:]
+    mt_pid, lagr_pos, tagged, density = unpack_pids(mt_pid,Lbox,PPD) 
+    del lagr_pos, tagged, density
+
+    header = mt_pids['header']
+    mt_pids.close()
+
+    return mt_pid, header
+
+
+@jit(nopython = True)
+def reindex_particles(pid,npstart,npout):
+    npstart_new = np.zeros(len(npout),dtype=int)
+    npstart_new[1:] = np.cumsum(npout)[:-1]
+    npout_new = npout
+    pid_new = np.zeros(np.sum(npout_new),dtype=pid.dtype)
+    for j in range(len(npstart)):
+        pid_new[npstart_new[j]:npstart_new[j]+npout_new[j]] = pid[npstart[j]:npstart[j]+npout[j]]
+    return pid_new, npstart_new, npout_new
+
 
 # save light cone catalog
 def save_asdf(table,filename,header,cat_lc_dir,z_in,i_chunk=None):

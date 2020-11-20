@@ -30,17 +30,28 @@ def get_zs_from_headers(snap_names):
         zs[i] = z
     return zs
 
+def distance_period(x0, x1, dimensions):
+    delta = np.abs(x0 - x1)
+    delta = np.where(delta > 0.5 * dimensions, delta - dimensions, delta)
+    return np.sqrt((delta ** 2).sum(axis=-1))
+
+def distance(x0, x1):
+    return np.sqrt(np.sum((x0-x1)**2,axis=1))
+
 # unpack indices in Sownak's format of Nslice*1e12 + superSlabNum*1e9 + halo_position_superSlab
 def unpack_inds(halo_ids):
-    index = (halo_ids%1e9).astype(int)
-    slab_number = ((halo_ids%1e12-index)/1e9).astype(int)
+
+    id_factor = 1000000000000
+    slab_factor = 1000000000
+    index = (halo_ids%slab_factor).astype(int)
+    slab_number = ((halo_ids%id_factor-index)//slab_factor).astype(int)
     return slab_number, index
 
 # reorder indices: for given halo index array with corresponding n halos and slabs for its time epoch
 def correct_inds(halo_ids, N_halos_slabs, slabs, start=0,stop=None,copies=1):
     # unpack indices
     slab_ids, ids = unpack_inds(halo_ids)
-
+    
     # total number of halos in the slabs that we have loaded
     N_halos = np.sum(N_halos_slabs[start:stop])
         
@@ -101,7 +112,9 @@ def get_mt_info(fns,fields,origin,start=0,stop=None,copies=1):
     halo_ind = merger_tree['HaloIndex']
 
     # compute comoving distance between observer and every halo
-    com_dist = np.sqrt(np.sum((pos-origin)**2,axis=1))
+    dimensions = np.array([Lbox,Lbox,Lbox])
+    com_dist = distance(pos,origin)
+    #com_dist = distance_period(pos,origin,dimensions)
     
     # if loading all progenitors
     if 'Progenitors' in fields:
@@ -116,13 +129,23 @@ def get_mt_info(fns,fields,origin,start=0,stop=None,copies=1):
 
 # solve when the crossing of the light cones occurs and the interpolated position and velocity
 def solve_crossing(r1,r2,pos1,pos2,chi1,chi2):
+    # identify where the distance between this object and its main progenitor is larger than half the boxsize (or really even 4 Mpc/h since that is Sownak's boundary)
+    delta_pos = np.abs(pos2 - pos1)
+    delta_pos = np.where(delta_pos > 0.5 * Lbox, (delta_pos - Lbox), delta_pos)
+    delta_sign = np.sign(pos1 - pos2)
+
+    # move the halos so that you keep things continuous
+    pos1 = pos2 + delta_sign*delta_pos
+    r1 = distance(origin,pos1)
+    r2 = distance(origin,pos2)
+    
     # solve for eta_star, where chi = eta_0-eta
     # equation is r1+(chi1-chi)/(chi1-chi2)*(r2-r1) = chi
     # with solution chi_star = (r1(chi1-chi2)+chi1(r2-r1))/((chi1-chi2)+(r2-r1))
     chi_star = (r1*(chi1-chi2)+chi1*(r2-r1))/((chi1-chi2)+(r2-r1))
     
     # get interpolated positions of the halos
-    v_avg = (pos2-pos1)/(chi1-chi2)
+    v_avg = (pos2-pos1)/(chi1-chi2) #og 
     pos_star = pos1+v_avg*(chi1-chi_star[:,None])
 
     # interpolated velocity [km/s]
@@ -131,7 +154,8 @@ def solve_crossing(r1,r2,pos1,pos2,chi1,chi2):
     # mark True if closer to chi2 (this snapshot) 
     bool_star = np.abs(chi1-chi_star) >  np.abs(chi2-chi_star)
 
-    assert np.sum((chi_star > chi1) | (chi_star < chi2)) == 0, "Solution is out of bounds"
+    # TESTING I think it should be fine regardless
+    #assert np.sum((chi_star > chi1) | (chi_star < chi2)) == 0, "Solution is out of bounds"
     
     return chi_star, pos_star, vel_star, bool_star
 
@@ -139,12 +163,12 @@ def solve_crossing(r1,r2,pos1,pos2,chi1,chi2):
 c = 299792.458 # km/s
 
 # simulation name
-sim_name = "AbacusSummit_base_c000_ph006"
-#sim_name = "AbacusSummit_highbase_c000_ph100"
+#sim_name = "AbacusSummit_base_c000_ph006"
+sim_name = "AbacusSummit_highbase_c000_ph100"
 
 # initial redshift where we start building the trees and final (incl.)
-z_start = 0.45#0.8#0.5
-z_stop = 1.25#0.8#0.5
+z_start = 0.3#0.8#0.5
+z_stop = 0.65#1.25#0.8#0.5
 
 # simulation parameters
 if '_highbase_' in sim_name:
@@ -153,7 +177,7 @@ if '_highbase_' in sim_name:
     # location of the origin in Mpc/h
     origin = np.array([-990.,-990.,-990.])/2.
     # directory where the merger tree is stored
-    merger_dir = "/mnt/store2/bigsims/merger/"+sim_name+"/"
+    merger_dir = "/mnt/gosling2/bigsims/merger/"+sim_name+"/"
 elif '_base_' in sim_name:
     # box size
     Lbox = 2000. # Mpc/h
@@ -176,18 +200,17 @@ resume = False
 # all redshifts, steps and comoving distances of light cones files; high z to low z
 zs_all = np.load("data_headers/redshifts.npy")
 chis_all = np.load("data_headers/coord_dist.npy")
-
+zs_all[-1] = float('%.1f'%zs_all[-1])
 
 # get functions relating chi and z
 chi_of_z = interp1d(zs_all,chis_all)
 z_of_chi = interp1d(chis_all,zs_all)
 
-# all merger tree snapshots and corresponding redshifts
-snaps_mt = sorted(glob.glob(merger_dir+"associations_z*.0.asdf.minified"))
-if len(snaps_mt) == 0:
-    snaps_mt = sorted(glob.glob(merger_dir+"associations_z*.0.asdf"))
 # more accurate, slightly slower
 if not os.path.exists("data/zs_mt.npy"):
+    # all merger tree snapshots and corresponding redshifts
+    snaps_mt = sorted(glob.glob(merger_dir+"associations_z*.0.asdf"))
+    print(snaps_mt)
     zs_mt = get_zs_from_headers(snaps_mt)
     np.save("data/zs_mt.npy",zs_mt)
 zs_mt = np.load("data/zs_mt.npy")
@@ -214,7 +237,7 @@ delta_chi_old = 0.
 
 # loop over each merger tree redshift
 for i in range(ind_start,ind_stop+1):
-
+    
     # this snapshot and previous
     z_this = zs_mt[i]
     z_prev = zs_mt[i+1]
@@ -246,7 +269,7 @@ for i in range(ind_start,ind_stop+1):
         assert np.abs(z_this-z_this_tmp) < 1.e-6, "Your recorded state is not for the correct redshift, can't resume from old"
         
     # what is the coordinate distance of the light cone at that redshift and the previous 
-    assert z_this > np.min(zs_all), "You need to set starting redshift to the smallest value of the merger tree"
+    assert z_this >= np.min(zs_all), "You need to set starting redshift to the smallest value of the merger tree"
     chi_this = chi_of_z(z_this)
     chi_prev = chi_of_z(z_prev)
     delta_chi = chi_prev-chi_this
@@ -311,7 +334,7 @@ for i in range(ind_start,ind_stop+1):
 
     # mask where no merger tree info is available or halos that are not eligible (because we don'to need to solve for eta star for those)
     mask_noinfo_this = (main_prog_this <= 0) | (~eligibility_this)
-    mask_info_this = (~mask_noinfo_this) & (eligibility_this) # TESTING not sure used to not have anything and above was or neg
+    mask_info_this = (~mask_noinfo_this) # TESTING latter is obsolete not sure used to not have anything and above was or neg
 
     # print percentage where no information is available or halo not eligible
     print("percentage no info or ineligible = ",np.sum(mask_noinfo_this)/len(mask_noinfo_this)*100.)
@@ -319,7 +342,7 @@ for i in range(ind_start,ind_stop+1):
     # no info is denoted by 0 or -999 (or regular if ineligible), but -999 messes with unpacking, so we set it to 0
     main_prog_this[mask_noinfo_this] = 0
 
-    # rework the main progenitor and halo indices to retun in proper order
+    # rework the main progenitor and halo indices to return in proper order
     main_prog_this = correct_inds(main_prog_this, N_halos_slabs_prev, slabs_prev, start=start_prev, stop=stop_prev, copies=copies_prev)
     halo_ind_this = correct_inds(halo_ind_this, N_halos_slabs_this, slabs_this, start=start_this, stop=stop_this, copies=copies_this)
     halo_ind_prev = correct_inds(halo_ind_prev, N_halos_slabs_prev, slabs_prev, start=start_prev, stop=stop_prev, copies=copies_prev)
@@ -355,11 +378,14 @@ for i in range(ind_start,ind_stop+1):
     #com_dist_prev_main_this_noinfo = com_dist_prev_main_this[mask_noinfo_this]
     
     # select objects that are crossing the light cones
-    mask_lc_this_info = (((com_dist_this_info > chi_this) & (com_dist_prev_main_this_info <= chi_prev)) | \
-                         ((com_dist_this_info > chi_prev) & (com_dist_prev_main_this_info <= chi_this))) & (eligibility_this_info)
+    # TESTING conservative choice if stranded between two ( & \) less conservative ( | \ )
+    mask_lc_this_info = (((com_dist_this_info > chi_this) & (com_dist_this_info <= chi_prev))) & (eligibility_this_info) #| \
+    #((com_dist_prev_main_this_info > chi_this) & (com_dist_prev_main_this_info <= chi_prev))) & (eligibility_this_info)
+    
     mask_lc_this_noinfo = ((com_dist_this_noinfo >= chi_this - delta_chi_old/2.) & \
                            (com_dist_this_noinfo < chi_this + delta_chi/2.)) & (eligibility_this_noinfo)
-
+    # why not just remove those at the beginning
+    
     # percentage of objects that are part of this or previous snapshot
     print("percentage of halos in light cone with and without progenitor info = ", \
           np.sum(mask_lc_this_info)/len(mask_lc_this_info)*100., np.sum(mask_lc_this_noinfo)/len(mask_lc_this_noinfo)*100.)
@@ -376,6 +402,43 @@ for i in range(ind_start,ind_stop+1):
         start_progs_this_info_lc = start_progs_this_info[mask_lc_this_info]
         num_progs_this_info_lc = num_progs_this_info[mask_lc_this_info]
 
+
+    
+    # START TESTING
+    '''
+    x_min = 0.
+    x_max = x_min+10.
+    
+    x = pos_this_info_lc[:,0]
+    choice = (x > x_min) & (x < x_max)
+    
+    y = pos_this_info_lc[choice,1]
+    z = pos_this_info_lc[choice,2]
+
+    plt.figure(1)
+    plt.scatter(y,z,color='dodgerblue',s=0.1,label='current objects')
+
+    plt.legend()
+    plt.axis('equal')
+    plt.savefig("this.png")
+    
+    x = pos_prev_main_this_info_lc[:,0]
+    choice = (x > x_min) & (x < x_max)
+    
+    y = pos_prev_main_this_info_lc[choice,1]
+    z = pos_prev_main_this_info_lc[choice,2]
+
+    plt.figure(2)
+    plt.scatter(y,z,color='orangered',s=0.1,label='main progenitor')
+
+    plt.legend()
+    plt.axis('equal')
+    plt.savefig("prev.png")
+    plt.show()
+    '''
+    # END TESTING
+    
+
     # select halos without mt info that have had a light cone crossing
     pos_this_noinfo_lc = pos_this_noinfo[mask_lc_this_noinfo]
     halo_ind_this_noinfo_lc = halo_ind_this_noinfo[mask_lc_this_noinfo]
@@ -387,6 +450,12 @@ for i in range(ind_start,ind_stop+1):
     # save the position and (dummy) velocity of the halos in the light cone without progenitor information
     pos_star_this_noinfo_lc = pos_this_noinfo_lc
     vel_star_this_noinfo_lc = pos_this_noinfo_lc*0.
+    chi_star_this_noinfo_lc = np.ones(pos_this_noinfo_lc.shape[0])*chi_this
+    
+    # TESTING record to test later
+    objs = [com_dist_prev_main_this_info_lc,com_dist_this_info_lc,pos_prev_main_this_info_lc,pos_this_info_lc,chi_prev,chi_this]
+    for k in range(len(objs)):
+        np.save('%d.npy'%k,objs[k])
     
     # get chi star where lc crosses halo trajectory; bool is False where closer to previous
     chi_star_this_info_lc, pos_star_this_info_lc, vel_star_this_info_lc, bool_star_this_info_lc = solve_crossing(com_dist_prev_main_this_info_lc,com_dist_this_info_lc,pos_prev_main_this_info_lc,pos_this_info_lc,chi_prev,chi_this)
@@ -405,16 +474,19 @@ for i in range(ind_start,ind_stop+1):
     # start new arrays for final output (assuming it is in this snapshot and not in previous)
     pos_interp_lc = np.zeros((N_lc,3))
     vel_interp_lc = np.zeros((N_lc,3))
+    chi_interp_lc = np.zeros(N_lc,dtype=np.float)
     halo_ind_lc = np.zeros(N_lc,dtype=int)
 
     # record interpolated position and velocity
     pos_interp_lc[:N_this_star_lc] = pos_star_this_info_lc[bool_elig_star_this_info_lc]
     vel_interp_lc[:N_this_star_lc] = vel_star_this_info_lc[bool_elig_star_this_info_lc]
     halo_ind_lc[:N_this_star_lc] = halo_ind_this_info_lc[bool_elig_star_this_info_lc]
+    chi_interp_lc[:N_this_star_lc] = chi_star_this_info_lc[bool_elig_star_this_info_lc]
     pos_interp_lc[-N_this_noinfo_lc:] = pos_star_this_noinfo_lc
     vel_interp_lc[-N_this_noinfo_lc:] = vel_star_this_noinfo_lc
     halo_ind_lc[-N_this_noinfo_lc:] = halo_ind_this_noinfo_lc
-
+    chi_interp_lc[-N_this_noinfo_lc:] = chi_star_this_noinfo_lc
+    
     # create directory for this redshift
     if not os.path.exists(os.path.join(cat_lc_dir,"z%.3f"%z_this)):
         os.makedirs(os.path.join(cat_lc_dir,"z%.3f"%z_this))
@@ -425,17 +497,23 @@ for i in range(ind_start,ind_stop+1):
             halo_ind_next = np.load(os.path.join(cat_lc_dir,'tmp','halo_ind_next.npy'))
             pos_star_next = np.load(os.path.join(cat_lc_dir,'tmp','pos_star_next.npy'))
             vel_star_next = np.load(os.path.join(cat_lc_dir,'tmp','vel_star_next.npy'))
+            chi_star_next = np.load(os.path.join(cat_lc_dir,'tmp','chi_star_next.npy'))
             resume = False
+        print(i,ind_start,resume)
         N_lc += len(halo_ind_next) # todo improve
         pos_interp_lc = np.vstack((pos_interp_lc,pos_star_next))
         vel_interp_lc = np.vstack((vel_interp_lc,vel_star_next))
+        chi_interp_lc = np.hstack((chi_interp_lc,chi_star_next))
         halo_ind_lc = np.hstack((halo_ind_lc,halo_ind_next))
         
+        
     # save those arrays
-    table_lc = np.empty(N_lc,dtype=[('halo_ind',halo_ind_lc.dtype),('pos_interp',(pos_interp_lc.dtype,3)),('vel_interp',(vel_interp_lc.dtype,3))])
+    table_lc = np.empty(N_lc,dtype=[('halo_ind',halo_ind_lc.dtype),('pos_interp',(pos_interp_lc.dtype,3)),('vel_interp',(vel_interp_lc.dtype,3)),('chi_interp',chi_interp_lc.dtype)])
     table_lc['halo_ind'] = halo_ind_lc
     table_lc['pos_interp'] = pos_interp_lc
     table_lc['vel_interp'] = vel_interp_lc
+    table_lc['chi_interp'] = chi_interp_lc
+    
     np.save(os.path.join(cat_lc_dir,"z%.3f"%z_this,'table_lc.npy'),table_lc)
     
     # mark eligibility
@@ -464,9 +542,10 @@ for i in range(ind_start,ind_stop+1):
             eligibility_prev[halo_inds] = False
 
     # information to keep for next redshift considered; should have dimensions equal to sum elig prev
+    chi_star_next = chi_star_this_info_lc[~bool_star_this_info_lc]
     vel_star_next = vel_star_this_info_lc[~bool_star_this_info_lc]
     pos_star_next = pos_star_this_info_lc[~bool_star_this_info_lc]
-
+    
     if want_plot:
         # select the halos in the light cones
         try:
@@ -514,6 +593,7 @@ for i in range(ind_start,ind_stop+1):
     np.save(os.path.join(cat_lc_dir,'tmp','halo_ind_next.npy'),halo_ind_next)
     np.save(os.path.join(cat_lc_dir,'tmp','pos_star_next.npy'),pos_star_next)
     np.save(os.path.join(cat_lc_dir,'tmp','vel_star_next.npy'),vel_star_next)
+    np.save(os.path.join(cat_lc_dir,'tmp','chi_star_next.npy'),chi_star_next)
     np.save(os.path.join(cat_lc_dir,'tmp','z_prev_delta_copies.npy'),np.array([z_prev, delta_chi, copies_prev]))
 
 #dict_keys(['HaloIndex', 'HaloMass', 'HaloVmax', 'IsAssociated', 'IsPotentialSplit', 'MainProgenitor', 'MainProgenitorFrac', 'MainProgenitorPrec', 'MainProgenitorPrecFrac', 'NumProgenitors', 'Position', 'Progenitors'])

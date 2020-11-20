@@ -1,36 +1,30 @@
-how to run:
+# How to run:
 
-build: start with 0.45 and finish at 3
-save: save for those exact same redshifts as above
-match: start with 0.5 and finish at 2.5 (should be smaller than build I think)
+run build: start with 0.45 and finish at 3
 
-# USE PYTHON3.6
+run save: save for those exact same redshifts as above
 
-questions:
+run match: start with 0.45 and finish at 3
 
-build: main progenitor vs progenitors
-build: untested and possibly we sometimes pick up the wrong objects because of the copying
-build: currently you have to start unless you want to save the eligibility, pos_star_next, halo_ind_next, vel_star_next, number of copies and delta chi (maybe save to txt file the output)
-build: SOME OF THE INTERPOLATED VALUES ARE AWAY FROM STRIP (NOT RELATED TO PREV NEXT AND ELIGIBILTY)
-
-save: use the clean catalogs
-save: save all fields in the catalogs
-save: interpolation of the velocities
+run hod: select model and run for all available slices
 
 
-match: is this actually working? print and make plots
-match: compare the new particle positions with what was in interp_lc for those halos
-match: the position of the new dudes depends on which box we are looking at
-match: TEST PERCENTAGE OF MATCHES
+Note: use python3.6 on alan (conflicts with packages)
 
-currently:
+# Outstanding questions:
 
-build, save: rename or delete old files
+in build: incorporate main progenitor as well as progenitors; check condition for falling into light cone
 
+in save: use the clean CompaSO catalogs; save all fields in the catalogs; interpolation of the velocities (currently using average velocity between snapshots)
 
-future:
+in match: compare the new particle positions with what was in interp_lc for those halos; TEST PERCENTAGE OF MATCHES
 
-create HODs for each redshift catalog: centrals uses halo vel/pos_interp; satellites should use the pos/vel of the pid_rv_lc tables
-downsampling should happen through the ['redshift'] field
+in hod: save the interpolated redshift for the centrals in build and print it out in the final mock
 
-build: perhaps save the interpolated redshift in the halo files
+# Final checks
+
+Are we repeating halos and particles?
+
+Are there gaps between the shells?
+
+Are we interpolating correctly (I believe there is a minus mistake right now when we do the exceptional cases in build)? Test: a b c skip b and compare clustering

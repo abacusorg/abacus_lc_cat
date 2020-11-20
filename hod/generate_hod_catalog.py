@@ -172,7 +172,7 @@ def gen_cent(halo_ids, halo_pos, halo_vels, halo_vrms, halo_mass, design_array, 
 
     # rsd
     if rsd:
-        pos_cents[:, 2] = (pos_cents[:, 2] + vel_cents[:, 2]/velz2kms) % lbox
+        pos_cents[:, 2] = (pos_cents[:, 2] + vel_cents[:, 2]/velz2kms) #TESTING % lbox
 
     # output to file
     newarray = np.concatenate((pos_cents, vel_cents, ids_cents[:, None], mass_cents[:, None]), axis = 1)
@@ -300,7 +300,7 @@ def gen_sats(halo_ids, halo_pos, halo_vels, halo_mass, halo_pstart, halo_pnum, p
 
         # rsd, modify the satellite positions by their velocities
         if rsd:
-            sat_pos[:,2] = (sat_pos[:,2] + sat_vels[:,2]/velz2kms) % lbox
+            sat_pos[:,2] = (sat_pos[:,2] + sat_vels[:,2]/velz2kms)# TESTING % lbox
 
         # output
         for j in range(len(sat_pos)):
@@ -385,7 +385,7 @@ def gen_gals(directory, design, fcent, fsats, rsd, params, m_cutoff = 4e12, what
         halo_pos = maskedhalos['pos_interp'][:]+lbox/2. # halo positions, Mpc/h
         #halo_vels = maskedhalos['v_L2com'] # halo velocities, km/s
         halo_vels = maskedhalos['vel_interp'][:] # halo velocities, km/s
-        #halo_vrms = maskedhalos['sigmav3d_L2com'] # TODO TESTING FIXME # halo velocity dispersions, km/s
+        #halo_vrms = maskedhalos['sigmav3d_L2com'] # halo velocity dispersions, km/s
         halo_vrms = np.ones(halo_vels.shape[0])*.0003 # TODO TESTING FIXME # halo velocity dispersions, km/s
         halo_mass = maskedhalos['N'][:]*params['Mpart'] # halo mass, Msun/h
         halo_pstart = maskedhalos['npstartA'][:] # starting index of particles

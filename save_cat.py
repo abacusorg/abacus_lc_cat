@@ -10,7 +10,7 @@ import gc
 import os
 
 from compaso_halo_catalog import CompaSOHaloCatalog
-from tools.aid_asdf import save_asdf
+from tools.aid_asdf import save_asdf, reindex_particles
 
 # TODO: copy halo info (just get rid of fields=fields_cat);  velocity interpolation (could be done when velocities are summoned, maybe don't interpolate); delete things properly; read parameters from header;
 
@@ -34,6 +34,8 @@ cat_lc_dir = "/mnt/gosling1/boryanah/light_cone_catalog/"+sim_name+"/halos_light
 
 # all merger tree redshifts
 zs_mt = np.load("data/zs_mt.npy")
+#load chis_mt 
+# tuks add interpolation
 
 # fields are we extracting from the catalogs
 fields_cat = ['id','npstartA','npoutA','N','x_L2com','v_L2com','sigmav3d_L2com']
@@ -65,6 +67,8 @@ for i in range(ind_start,ind_stop+1):
     halo_ind_lc = table_lc['halo_ind']
     pos_interp_lc = table_lc['pos_interp']
     vel_interp_lc = table_lc['vel_interp']
+    # tuks load chi
+    chi_interp_lc = table_lc['chi_interp']
     
     # catalog directory
     catdir = os.path.join(cat_dir,"z%.3f"%z_cat)
@@ -85,26 +89,23 @@ for i in range(ind_start,ind_stop+1):
     pid = cat.subsamples['pid']
     npstart = halo_table['npstartA']
     npout = halo_table['npoutA']
-    npstart_new = np.zeros(len(npout),dtype=int)
-    npstart_new[1:] = np.cumsum(npout)[:-1]
-    npout_new = npout
-    pid_new = np.zeros(np.sum(npout_new),dtype=pid.dtype)
-    for j in range(len(npstart)):
-        pid_new[npstart_new[j]:npstart_new[j]+npout_new[j]] = pid[npstart[j]:npstart[j]+npout[j]]
+    pid_new, npstart_new, npout_new = reindex_particles(pid,npstart,npout)        
     pid_table = np.empty(len(pid_new),dtype=[('pid',pid_new.dtype)])
     pid_table['pid'] = pid_new
     halo_table['npstartA'] = npstart_new
     halo_table['npoutA'] = npout_new
 
-    # isolate halos that had proper interpolation tuks
+    # isolate halos that did not have interpolation and get the velocity from the halo info files
     not_interp = np.sum(vel_interp_lc,axis=1) == 0.
+    vel_interp_lc[not_interp] = halo_table['v_L2com'][not_interp]
     print("percentage not interpolated = ",100.*np.sum(not_interp)/len(not_interp))
     
-    # append new fields; if 0 velocity change with the original
+    # append new fields
     halo_table['index_halo'] = halo_ind_lc
     halo_table['pos_interp'] = pos_interp_lc
-    vel_interp_lc[not_interp] = halo_table['v_L2com'][not_interp]
     halo_table['vel_interp'] = vel_interp_lc
+    # tuks do some tests
+    halo_table['redshift_interp'] = z_of_chi(chi_interp_lc)
 
     # save to files
     save_asdf(halo_table,"halo_info_lc",header,cat_lc_dir,z_in)
