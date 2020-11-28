@@ -20,9 +20,10 @@ import asdf
 import numpy as np
 from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
+import argparse
 import numba as nb
 
-from tools.merger import simple_load, get_slab_halo, extract_superslab
+from tools.merger import simple_load, get_slab_halo, extract_superslab, extract_superslab_minified
 
 # these are probably just for testing; should be removed for production
 DEFAULTS = {}
@@ -32,8 +33,11 @@ DEFAULTS['z_stop'] = 0.65  # 1.25#0.8#0.5
 
 
 # reorder in terms of their slab number
-def reorder_by_slab(fns):
-    return sorted(fns, key=extract_superslab)
+def reorder_by_slab(fns,minified):
+    if minified:
+        return sorted(fns, key=extract_superslab_minified)
+    else:
+        return sorted(fns, key=extract_superslab)
 
 
 # read redshifts from merger tree files
@@ -133,7 +137,7 @@ def correct_inds(halo_ids, N_halos_slabs, slabs, start=0, stop=None, copies=1):
 
 
 # load merger tree and progenitors information
-def get_mt_info(fns, fields, origin, start=0, stop=None, copies=1):
+def get_mt_info(fns, fields, origin, minified, start=0, stop=None, copies=1):
 
     # if we are loading all progenitors and not just main
     if "Progenitors" in fields:
@@ -141,6 +145,7 @@ def get_mt_info(fns, fields, origin, start=0, stop=None, copies=1):
     else:
         merger_tree = simple_load(fns[start:stop], fields=fields)
 
+    # tuks get rid of this when actually working with different halo origins
     # if a far redshift, need 2 copies only
     if copies == 2:
         merger_tree0 = merger_tree
@@ -160,13 +165,15 @@ def get_mt_info(fns, fields, origin, start=0, stop=None, copies=1):
         merger_tree = np.hstack((merger_tree0, merger_tree1, merger_tree2))
 
     # get number of halos in each slab and number of slabs
-    N_halos_slabs, slabs = get_slab_halo(fns)
+    N_halos_slabs, slabs = get_slab_halo(fns, minified)
 
+    
     # load positions in Mpc/h, index of the main progenitors, index of halo
     pos = merger_tree["Position"]
     main_prog = merger_tree["MainProgenitor"]
     halo_ind = merger_tree["HaloIndex"]
-
+    
+    
     # compute comoving distance between observer and every halo
     com_dist = dist(pos, origin)
     # com_dist = dist(pos,origin,L=Lbox)  # periodic version
@@ -194,7 +201,7 @@ def get_mt_info(fns, fields, origin, start=0, stop=None, copies=1):
 
 
 # solve when the crossing of the light cones occurs and the interpolated position and velocity
-def solve_crossing(r1, r2, pos1, pos2, chi1, chi2):
+def solve_crossing(r1, r2, pos1, pos2, chi1, chi2, Lbox, origin):
     # identify where the distance between this object and its main progenitor is larger than half the boxsize (or really even 4 Mpc/h since that is Sownak's boundary)
     delta_pos = np.abs(pos2 - pos1)
     delta_pos = np.where(delta_pos > 0.5 * Lbox, (delta_pos - Lbox), delta_pos)
@@ -202,8 +209,8 @@ def solve_crossing(r1, r2, pos1, pos2, chi1, chi2):
 
     # move the halos so that you keep things continuous
     pos1 = pos2 + delta_sign * delta_pos
-    r1 = dist(origin, pos1)
-    r2 = dist(origin, pos2)
+    r1 = dist(pos1, origin)
+    r2 = dist(pos2, origin)
 
     # solve for eta_star, where chi = eta_0-eta
     # equation is r1+(chi1-chi)/(chi1-chi2)*(r2-r1) = chi
@@ -220,9 +227,10 @@ def solve_crossing(r1, r2, pos1, pos2, chi1, chi2):
     # mark True if closer to chi2 (this snapshot)
     bool_star = np.abs(chi1 - chi_star) > np.abs(chi2 - chi_star)
 
-    # TESTING I think it should be fine regardless
+    # condition to check whether halo in this light cone band
     # assert np.sum((chi_star > chi1) | (chi_star < chi2)) == 0, "Solution is out of bounds"
 
+    
     return chi_star, pos_star, vel_star, bool_star
 
 
@@ -236,6 +244,7 @@ def get_one_header(merger_dir):
 
 def main(sim_name, z_start, z_stop, resume=False, plot=False):
     # speed of light
+    global c
     c = 299792.458  # km/s
     
     merger_parent = Path("/mnt/gosling2/bigsims/merger")
@@ -269,7 +278,6 @@ def main(sim_name, z_start, z_stop, resume=False, plot=False):
     if not os.path.exists("data/zs_mt.npy"):
         # all merger tree snapshots and corresponding redshifts
         snaps_mt = sorted(merger_dir.glob("associations_z*.0.asdf"))
-        print(snaps_mt)
         zs_mt = get_zs_from_headers(snaps_mt)
         np.save("data/zs_mt.npy", zs_mt)
     zs_mt = np.load("data/zs_mt.npy")
@@ -356,101 +364,101 @@ def main(sim_name, z_start, z_stop, resume=False, plot=False):
         print("comoving distance between this and previous snapshot = ", delta_chi)
 
         # read merger trees file names at this and previous snapshot
-
         fns_this = merger_dir.glob(f'associations_z{z_this:4.3f}.*.asdf.minified')
         fns_prev = merger_dir.glob(f'associations_z{z_prev:4.3f}.*.asdf.minified')
-        if len(fns_this) == 0 or len(fns_prev) == 0:
+        fns_this = list(fns_this)
+        fns_prev = list(fns_prev)
+        minified = True
+        
+        if len(list(fns_this)) == 0 or len(list(fns_prev)) == 0:
             fns_this = merger_dir.glob(f'associations_z{z_this:4.3f}.*.asdf')
             fns_prev = merger_dir.glob(f'associations_z{z_prev:4.3f}.*.asdf')
-        print("number of files = ", len(fns_this), len(fns_prev))
+            fns_this = list(fns_this)
+            fns_prev = list(fns_prev)
+            minified = False
 
+        for counter in range(len(fns_this)):
+            fns_this[counter] = str(fns_this[counter])
+            fns_prev[counter] = str(fns_prev[counter])
+
+
+        print("number of files = ", len(list(fns_this)), len(list(fns_prev)))
         # number of chunks
-        n_chunks = len(fns_this)
-        assert n_chunks == len(fns_prev), "Incomplete merger tree files"
+        n_chunks = len(list(fns_this))
+        assert n_chunks == len(list(fns_prev)), "Incomplete merger tree files"
 
         # reorder file names by super slab number
-        fns_this = reorder_by_slab(fns_this)
-        fns_prev = reorder_by_slab(fns_prev)
-
+        fns_this = reorder_by_slab(fns_this,minified)
+        fns_prev = reorder_by_slab(fns_prev,minified)
+        
         # starting and finishing superslab chunks; it is best to use all
         start_this = 0
         stop_this = n_chunks
         start_prev = 0
         stop_prev = n_chunks
 
+        # tuks perhaps repeat for multiple origins
         # get comoving distance and other merger tree data for this snapshot and for the previous one
         if "Progenitors" in fields_mt:
             (
-                com_dist_this,
-                main_prog_this,
-                halo_ind_this,
-                pos_this,
-                start_progs_this,
-                num_progs_this,
-                progs_this,
+                Merger_this
+                Progs_this,
                 N_halos_slabs_this,
                 slabs_this,
             ) = get_mt_info(
                 fns_this,
                 fields=fields_mt,
                 origin=origin,
+                minified=minified,
                 start=start_this,
                 stop=stop_this,
                 copies=copies_this,
             )
             (
-                com_dist_prev,
-                main_prog_prev,
-                halo_ind_prev,
-                pos_prev,
-                start_progs_prev,
-                num_progs_prev,
-                progs_prev,
+                Merger_prev,
+                Progs_prev,
                 N_halos_slabs_prev,
-                slabs_prev,
+                slabs_prev
             ) = get_mt_info(
                 fns_prev,
                 fields=fields_mt,
                 origin=origin,
+                minified=minified,
                 start=start_prev,
                 stop=stop_prev,
                 copies=copies_prev,
             )
         else:
             (
-                com_dist_this,
-                main_prog_this,
-                halo_ind_this,
-                pos_this,
+                Merger_this,
                 N_halos_slabs_this,
                 slabs_this,
             ) = get_mt_info(
                 fns_this,
                 fields=fields_mt,
                 origin=origin,
+                minified=minified,
                 start=start_this,
                 stop=stop_this,
                 copies=copies_this,
             )
             (
-                com_dist_prev,
-                main_prog_prev,
-                halo_ind_prev,
-                pos_prev,
+                Merger_prev,
                 N_halos_slabs_prev,
                 slabs_prev,
             ) = get_mt_info(
                 fns_prev,
                 fields=fields_mt,
                 origin=origin,
+                minified=minified,
                 start=start_prev,
                 stop=stop_prev,
                 copies=copies_prev,
             )
 
         # number of halos in this step and previous step; this depends on the number of copies and files requested
-        N_halos_this = len(com_dist_this)
-        N_halos_prev = len(com_dist_prev)
+        N_halos_this = Merger_this.shape[0]
+        N_halos_prev = Merger_prev.shape[0]
         print("N_halos_this = ", N_halos_this)
         print("N_halos_prev = ", N_halos_prev)
 
@@ -460,6 +468,7 @@ def main(sim_name, z_start, z_stop, resume=False, plot=False):
             if resume:
                 eligibility_this = np.load(cat_lc_dir / "tmp" / "eligibility_prev.npy")
             # needs more copies if transitioning from 1 to 3 and 3 to 2 intersections
+            # tuks write out for 3 light cones
             if copies_old == 1 and copies_this == 3:
                 eligibility_this = np.hstack(
                     (eligibility_this, eligibility_this, eligibility_this)
@@ -481,7 +490,7 @@ def main(sim_name, z_start, z_stop, resume=False, plot=False):
         mask_noinfo_this = (main_prog_this <= 0) | (~eligibility_this)
         mask_info_this = (
             ~mask_noinfo_this
-        )  # TESTING latter is obsolete not sure used to not have anything and above was or neg
+        )  # todo: revise eligibility etc
 
         # print percentage where no information is available or halo not eligible
         print(
@@ -549,7 +558,7 @@ def main(sim_name, z_start, z_stop, resume=False, plot=False):
         # com_dist_prev_main_this_noinfo = com_dist_prev_main_this[mask_noinfo_this]
 
         # select objects that are crossing the light cones
-        # TESTING conservative choice if stranded between two ( & \) less conservative ( | \ )
+        # TODO: revise conservative choice if stranded between two ( & \) less conservative ( | \ )
         mask_lc_this_info = (
             ((com_dist_this_info > chi_this) & (com_dist_this_info <= chi_prev))
         ) & (
@@ -582,40 +591,37 @@ def main(sim_name, z_start, z_stop, resume=False, plot=False):
             start_progs_this_info_lc = start_progs_this_info[mask_lc_this_info]
             num_progs_this_info_lc = num_progs_this_info[mask_lc_this_info]
 
-        # START TESTING
-        """
-        x_min = 0.
-        x_max = x_min+10.
+        if plot:
+            x_min = -500.
+            x_max = x_min+10.
 
-        x = pos_this_info_lc[:,0]
-        choice = (x > x_min) & (x < x_max)
+            x = pos_this_info_lc[:,0]
+            choice = (x > x_min) & (x < x_max)
 
-        y = pos_this_info_lc[choice,1]
-        z = pos_this_info_lc[choice,2]
+            y = pos_this_info_lc[choice,1]
+            z = pos_this_info_lc[choice,2]
 
-        plt.figure(1)
-        plt.scatter(y,z,color='dodgerblue',s=0.1,label='current objects')
+            plt.figure(1)
+            plt.scatter(y,z,color='dodgerblue',s=0.1,label='current objects')
 
-        plt.legend()
-        plt.axis('equal')
-        plt.savefig("this.png")
+            plt.legend()
+            plt.axis('equal')
+            plt.savefig("this.png")
+        
+            x = pos_prev_main_this_info_lc[:,0]
+            choice = (x > x_min) & (x < x_max)
+        
+            y = pos_prev_main_this_info_lc[choice,1]
+            z = pos_prev_main_this_info_lc[choice,2]
 
-        x = pos_prev_main_this_info_lc[:,0]
-        choice = (x > x_min) & (x < x_max)
-
-        y = pos_prev_main_this_info_lc[choice,1]
-        z = pos_prev_main_this_info_lc[choice,2]
-
-        plt.figure(2)
-        plt.scatter(y,z,color='orangered',s=0.1,label='main progenitor')
-
-        plt.legend()
-        plt.axis('equal')
-        plt.savefig("prev.png")
-        plt.show()
-        """
-        # END TESTING
-
+            plt.figure(2)
+            plt.scatter(y,z,color='orangered',s=0.1,label='main progenitor')
+            
+            plt.legend()
+            plt.axis('equal')
+            plt.savefig("prev.png")
+            plt.show()
+        
         # select halos without mt info that have had a light cone crossing
         pos_this_noinfo_lc = pos_this_noinfo[mask_lc_this_noinfo]
         halo_ind_this_noinfo_lc = halo_ind_this_noinfo[mask_lc_this_noinfo]
@@ -629,7 +635,7 @@ def main(sim_name, z_start, z_stop, resume=False, plot=False):
         vel_star_this_noinfo_lc = pos_this_noinfo_lc * 0.0
         chi_star_this_noinfo_lc = np.ones(pos_this_noinfo_lc.shape[0]) * chi_this
 
-        # TESTING record to test later
+        # REMOVE ME record to test later
         objs = [
             com_dist_prev_main_this_info_lc,
             com_dist_this_info_lc,
@@ -654,6 +660,8 @@ def main(sim_name, z_start, z_stop, resume=False, plot=False):
             pos_this_info_lc,
             chi_prev,
             chi_this,
+            Lbox,
+            origin
         )
 
         # add ineligible halos if any from last iteration of the loop to those crossed in previous
@@ -689,7 +697,7 @@ def main(sim_name, z_start, z_stop, resume=False, plot=False):
         chi_interp_lc[-N_this_noinfo_lc:] = chi_star_this_noinfo_lc
 
         # create directory for this redshift
-        os.makedirs(cat_lc_dir / "z%.3f" % z_this, exist_ok=True)
+        os.makedirs(cat_lc_dir / ("z%.3f"%z_this), exist_ok=True)
 
         # adding contributions from the previous
         if i != ind_start or resume:
@@ -699,7 +707,7 @@ def main(sim_name, z_start, z_stop, resume=False, plot=False):
                 vel_star_next = np.load(cat_lc_dir / "tmp" / "vel_star_next.npy")
                 chi_star_next = np.load(cat_lc_dir / "tmp" / "chi_star_next.npy")
                 resume = False
-            print(i, ind_start, resume)
+            
             N_lc += len(halo_ind_next)  # todo improve
             pos_interp_lc = np.vstack((pos_interp_lc, pos_star_next))
             vel_interp_lc = np.vstack((vel_interp_lc, vel_star_next))
@@ -721,7 +729,7 @@ def main(sim_name, z_start, z_stop, resume=False, plot=False):
         table_lc["vel_interp"] = vel_interp_lc
         table_lc["chi_interp"] = chi_interp_lc
 
-        np.save(cat_lc_dir / "z%.3f" % z_this / "table_lc.npy", table_lc)
+        np.save(cat_lc_dir / ("z%.3f"%z_this) / "table_lc.npy", table_lc)
 
         # mark eligibility
         # version 1: only the main progenitor is marked ineligible;
@@ -742,7 +750,7 @@ def main(sim_name, z_start, z_stop, resume=False, plot=False):
             for j in range(len(start_progs_this_info_lc[~bool_star_this_info_lc])):
                 start = (start_progs_this_info_lc[~bool_star_this_info_lc])[j]
                 num = (num_progs_this_info_lc[~bool_star_this_info_lc])[j]
-                prog_inds = progs_this[start : start + num]
+                prog_inds = Progs_this[start : start + num]
                 prog_inds = correct_inds(prog_inds, N_halos_slabs_prev, slabs_prev)
                 halo_inds = halo_ind_prev[prog_inds]
                 # if j < 100: print(halo_inds, halo_ind_next[j])
@@ -837,15 +845,13 @@ class ArgParseFormatter(argparse.RawDescriptionHelpFormatter, argparse.ArgumentD
 
 
 if __name__ == '__main__':
-    import argparse
+
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=ArgParseFormatter)
-    parser.add_argument('sim_name', help='Simulation name', default=DEFAULTS['sim_name'])
-    parser.add_argument('z_start', help='Initial redshift where we start building the trees', default=DEFAULTS['z_start'])
-    parser.add_argument('z_stop', help='Final redshift (inclusive)', default=DEFAULTS['z_end'])
+    parser.add_argument('--sim_name', help='Simulation name', default=DEFAULTS['sim_name'])
+    parser.add_argument('--z_start', help='Initial redshift where we start building the trees', default=DEFAULTS['z_start'])
+    parser.add_argument('--z_stop', help='Final redshift (inclusive)', default=DEFAULTS['z_stop'])
     parser.add_argument('--resume', help='Resume the calculation from the checkpoint on disk', action='store_true')
     parser.add_argument('--plot', help='Want to show plots', action='store_true')
     
     args = vars(parser.parse_args())
-    
     main(**args)
-    
