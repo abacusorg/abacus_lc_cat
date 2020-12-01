@@ -34,7 +34,7 @@ def load_mt_pid(mt_fn,Lbox,PPD):
 
 @jit(nopython = True)
 def reindex_particles(pid,npstart,npout):
-    npstart_new = np.zeros(len(npout),dtype=int)
+    npstart_new = np.zeros(len(npout),dtype=np.int64)
     npstart_new[1:] = np.cumsum(npout)[:-1]
     npout_new = npout
     pid_new = np.zeros(np.sum(npout_new),dtype=pid.dtype)
@@ -44,7 +44,7 @@ def reindex_particles(pid,npstart,npout):
 
 
 # save light cone catalog
-def save_asdf(table,filename,header,cat_lc_dir,z_in,i_chunk=None):
+def save_asdf(table,filename,header,cat_lc_dir):
     # cram into a dictionary
     data_dict = {}
     for j in range(len(table.dtype.names)):
@@ -56,11 +56,8 @@ def save_asdf(table,filename,header,cat_lc_dir,z_in,i_chunk=None):
         "data": data_dict,
         "header": header,
     }
-
+    
     # save the data and close file
     output_file = asdf.AsdfFile(data_tree)
-    if i_chunk is not None:
-        output_file.write_to(os.path.join(cat_lc_dir,"z%.3f"%z_in,filename+".%d.asdf"%(z_in,i_chunk)))
-    else:
-        output_file.write_to(os.path.join(cat_lc_dir,"z%.3f"%z_in,filename+".asdf"%(z_in)))
+    output_file.write_to(os.path.join(cat_lc_dir,filename+".asdf"))
     output_file.close()

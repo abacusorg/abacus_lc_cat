@@ -24,8 +24,8 @@ PPD = 6912
 
 # initial redshift where we start building the trees
 # aiming to get these: 0.575, 0.65, 0.725,
-z_lowest = 0.8#0.5 # 0.45
-z_highest = 1.179 # 0.8 # 2.45 # including
+z_lowest = 0.576#0.5
+z_highest = 0.725#1.25 # 1.25 # 2.45 # including
 
 # location of the origin in Mpc/h
 origin = np.array([-990.,-990.,-990.])
@@ -212,6 +212,19 @@ for step in range(step_start,step_stop+1):
             
         print("-------------------")
 
+
+# close the two that are currently open
+for i in range(len(currently_loaded_zs)):
+    # save the information about that redshift
+    save_asdf(currently_loaded_tables[0],"pid_rv_lc",currently_loaded_headers[0],cat_lc_dir,currently_loaded_zs[0])
+    print("saved catalog = ",currently_loaded_zs[0])
+            
+    # discard it from currently loaded
+    currently_loaded_zs = currently_loaded_zs[1:]
+    currently_loaded_headers = currently_loaded_headers[1:]
+    currently_loaded_pids = currently_loaded_pids[1:]
+    currently_loaded_tables = currently_loaded_tables[1:]
+quit()
 # close the file that was open to write in # what is this tuks
 save_asdf(lc_table_final,"pid_rv_lc",header,cat_lc_dir,mt_z)
 print("closed redshift = ",mt_z)

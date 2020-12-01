@@ -34,8 +34,16 @@ cat_lc_dir = "/mnt/gosling1/boryanah/light_cone_catalog/"+sim_name+"/halos_light
 
 # all merger tree redshifts
 zs_mt = np.load("data/zs_mt.npy")
-#load chis_mt 
-# tuks add interpolation
+
+
+# all redshifts, steps and comoving distances of light cones files; high z to low z
+zs_all = np.load("data_headers/redshifts.npy")
+chis_all = np.load("data_headers/coord_dist.npy")
+zs_all[-1] = float('%.1f'%zs_all[-1])
+
+# get functions relating chi and z
+chi_of_z = interp1d(zs_all,chis_all)
+z_of_chi = interp1d(chis_all,zs_all)
 
 # fields are we extracting from the catalogs
 fields_cat = ['id','npstartA','npoutA','N','x_L2com','v_L2com','sigmav3d_L2com']
@@ -49,8 +57,10 @@ zs_cat = [extract_redshift(redshifts[i]) for i in range(len(redshifts))]
 print(zs_cat)
 
 # initial redshift where we start building the trees
-z_start = 0.45
-z_stop = 1.25
+#z_start = 0.3 # highbase
+#z_stop = 0.65 # highbase
+z_start = 0.5 # base
+z_stop = 1.25 # base
 ind_start = np.argmin(np.abs(zs_mt-z_start))
 ind_stop = np.argmin(np.abs(zs_mt-z_stop))
 
@@ -67,7 +77,6 @@ for i in range(ind_start,ind_stop+1):
     halo_ind_lc = table_lc['halo_ind']
     pos_interp_lc = table_lc['pos_interp']
     vel_interp_lc = table_lc['vel_interp']
-    # tuks load chi
     chi_interp_lc = table_lc['chi_interp']
     
     # catalog directory
@@ -96,7 +105,7 @@ for i in range(ind_start,ind_stop+1):
     halo_table['npoutA'] = npout_new
 
     # isolate halos that did not have interpolation and get the velocity from the halo info files
-    not_interp = np.sum(vel_interp_lc,axis=1) == 0.
+    not_interp = (np.sum(np.abs(vel_interp_lc),axis=1) - 0.) < 1.e-6
     vel_interp_lc[not_interp] = halo_table['v_L2com'][not_interp]
     print("percentage not interpolated = ",100.*np.sum(not_interp)/len(not_interp))
     
@@ -104,14 +113,13 @@ for i in range(ind_start,ind_stop+1):
     halo_table['index_halo'] = halo_ind_lc
     halo_table['pos_interp'] = pos_interp_lc
     halo_table['vel_interp'] = vel_interp_lc
-    # tuks do some tests
     halo_table['redshift_interp'] = z_of_chi(chi_interp_lc)
 
     # save to files
-    save_asdf(halo_table,"halo_info_lc",header,cat_lc_dir,z_in)
+    save_asdf(halo_table,"halo_info_lc",header,cat_lc_dir+"/z%4.3f/"%z_in)
     #save_asdf(pid_table,"pid_rv_lc",header,cat_lc_dir,z_in)
     # TESTING
-    save_asdf(pid_table,"pid_lc",header,cat_lc_dir,z_in)
+    save_asdf(pid_table,"pid_lc",header,cat_lc_dir+"/z%4.3f/"%z_in)
 
     # delete things at the end
     del pid, pid_new, pid_table, npstart, npout, npstart_new, npout_new

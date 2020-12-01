@@ -89,7 +89,7 @@ def n_sat(M_in, design_array, m_cutoff = 4e12):
     return ((M_in - kappa*M_cut)/M1)**alpha*0.5*erfc(np.log(M_cut/M_in)/(2**.5*sigma))
 
 
-def gen_cent(halo_ids, halo_pos, halo_vels, halo_vrms, halo_mass, design_array, rsd, fcent, velz2kms, lbox, m_cutoff = 4e12, whatseed = 0):
+def gen_cent(halo_ids, halo_pos, halo_vels, halo_vrms, halo_mass, halo_zs, design_array, rsd, fcent, velz2kms, lbox, m_cutoff = 4e12, whatseed = 0):
     """
     Function that generates central galaxies and its position and velocity 
     given a halo catalog and HOD designs. The generated 
@@ -112,6 +112,9 @@ def gen_cent(halo_ids, halo_pos, halo_vels, halo_vrms, halo_mass, design_array, 
 
     halo_mass : numpy.array
         Array of halo mass in solar mass.
+
+    halo_zs : numpy.array
+        Array of (interpolated if light cones) halo redshifts
 
     design_array : np array
         Array containing the five baseline HOD parameters. 
@@ -169,19 +172,20 @@ def gen_cent(halo_ids, halo_pos, halo_vels, halo_vrms, halo_mass, design_array, 
     vel_cents[:, 2] += extra_vlos[mask_cents] # add on velocity bias
     mass_cents = halo_mass[mask_cents]
     ids_cents = halo_ids[mask_cents]
-
+    z_cents = halo_zs[mask_cents]
+    
     # rsd
     if rsd:
         pos_cents[:, 2] = (pos_cents[:, 2] + vel_cents[:, 2]/velz2kms) #TESTING % lbox
 
     # output to file
-    newarray = np.concatenate((pos_cents, vel_cents, ids_cents[:, None], mass_cents[:, None]), axis = 1)
+    newarray = np.concatenate((pos_cents, vel_cents, zs_cents[:,None], ids_cents[:, None], mass_cents[:, None]), axis = 1)
     newarray.tofile(fcent)
 
 
 
 @jit(nopython = True)
-def gen_sats(halo_ids, halo_pos, halo_vels, halo_mass, halo_pstart, halo_pnum, part_pos, part_vel, part_pid, rsd, velz2kms, lbox, m_cutoff = 4e12, whatseed = 0, want_pid = False):
+def gen_sats(halo_ids, halo_pos, halo_vels, halo_mass, halo_pstart, halo_pnum, part_pos, part_vel, part_z, rsd, velz2kms, lbox, m_cutoff = 4e12, whatseed = 0, want_pid = False):
     
     """
     Function that generates satellite galaxies and their positions and 
@@ -216,8 +220,8 @@ def gen_sats(halo_ids, halo_pos, halo_vels, halo_mass, halo_pstart, halo_pnum, p
     part_vel : numpy.array
         Array of particle velocities
 
-    part_pid : numpy.array
-        Array of particle ids
+    part_z   : numpy.array
+        Array of particle light cone redshifts
 
     design_array : np array
         Array containing the five baseline HOD parameters. 
@@ -266,7 +270,7 @@ def gen_sats(halo_ids, halo_pos, halo_vels, halo_mass, halo_pstart, halo_pnum, p
         # extract the particle positions and vels
         ss_pos = part_pos[start_ind: start_ind + numparts] # Mpc/h
         ss_vels = part_vel[start_ind: start_ind + numparts] # km/s
-        ss_pids = part_pid[start_ind: start_ind + numparts] # integer
+        ss_zs = part_z[start_ind: start_ind + numparts] # float
 
         # generate a list of random numbers that will track each particle
         random_list = np.random.random(numparts)
@@ -292,7 +296,7 @@ def gen_sats(halo_ids, halo_pos, halo_vels, halo_mass, halo_pstart, halo_pnum, p
         # generate the position and velocity of the galaxies
         sat_pos = ss_pos[newmask]
         sat_vels = ss_vels[newmask]
-        sat_pids = ss_pids[newmask]
+        sat_zs = ss_zs[newmask]
 
         # so a lot of the sat_pos are empty, in that case, just pass
         if len(sat_pos) == 0:
@@ -310,7 +314,7 @@ def gen_sats(halo_ids, halo_pos, halo_vels, halo_mass, halo_pstart, halo_pnum, p
                                      sat_vels[j, 0],
                                      sat_vels[j, 1],
                                      sat_vels[j, 2],
-                                     sat_pids[j],
+                                     sat_zs[j],
                                      thishalo_id, 
                                      thishalo_mass]])
             data_sats = np.vstack((data_sats, newline_sat))
@@ -385,9 +389,9 @@ def gen_gals(directory, design, fcent, fsats, rsd, params, m_cutoff = 4e12, what
         halo_pos = maskedhalos['pos_interp'][:]+lbox/2. # halo positions, Mpc/h
         #halo_vels = maskedhalos['v_L2com'] # halo velocities, km/s
         halo_vels = maskedhalos['vel_interp'][:] # halo velocities, km/s
-        #halo_vrms = maskedhalos['sigmav3d_L2com'] # halo velocity dispersions, km/s
-        halo_vrms = np.ones(halo_vels.shape[0])*.0003 # TODO TESTING FIXME # halo velocity dispersions, km/s
+        halo_vrms = maskedhalos['sigmav3d_L2com'] # halo velocity dispersions, km/s
         halo_mass = maskedhalos['N'][:]*params['Mpart'] # halo mass, Msun/h
+        halo_zs = maskedhalos['redshift_interp'][:] # halo redshifts
         halo_pstart = maskedhalos['npstartA'][:] # starting index of particles
         halo_pnum = maskedhalos['npoutA'][:] # number of particles
         halo_multi = np.ones(len(halo_pnum))
@@ -396,7 +400,7 @@ def gen_gals(directory, design, fcent, fsats, rsd, params, m_cutoff = 4e12, what
         #halo_submask = maskedhalos['mask_subsample']  #tuks no need
 
         # for each halo, generate central galaxies and output to file
-        gen_cent(halo_ids, halo_pos, halo_vels, halo_vrms, halo_mass, 
+        gen_cent(halo_ids, halo_pos, halo_vels, halo_vrms, halo_mass, halo_zs, 
                  design_array, rsd, fcent, velz2kms, lbox, m_cutoff = m_cutoff, whatseed = whatseed)
 
         # open particle file
@@ -404,15 +408,15 @@ def gen_gals(directory, design, fcent, fsats, rsd, params, m_cutoff = 4e12, what
         subsample = particles['data']
         part_pos = subsample['pos'][:]+lbox/2. # Mpc/h
         part_vel = subsample['vel'][:] # km/s
-        if want_pid:
+        part_z = subsample['redshift'][:] # km/s
+        if want_pid: # TODO don't really need it
             part_pid = subsample['pid'][:]
-        else:
-            part_pid = np.zeros(part_pos.shape[0],dtype=int)
+        
         
         # for each halo, generate satellites and output to file        
         data_sats = gen_sats(halo_ids, halo_pos, 
                              halo_vels, halo_mass, halo_pstart, 
-                             halo_pnum, part_pos, part_vel, part_pid,
+                             halo_pnum, part_pos, part_vel, part_z,
                              rsd, velz2kms, lbox, m_cutoff = m_cutoff,
                              whatseed = whatseed, want_pid = want_pid)
 

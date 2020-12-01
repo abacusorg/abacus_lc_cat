@@ -2,6 +2,7 @@ import asdf
 import numpy as np
 import scipy.stats as scist
 import matplotlib.pyplot as plt
+from astropy.table import Table
 
 # todo: can speed up by using info about how many halos instead concatenating
 
@@ -10,8 +11,12 @@ def extract_superslab(fn):
     # looks like "associations_z0.100.0.asdf"
     return int(fn.split('.')[-2])
 
-
+def extract_superslab_minified(fn):
+    # looks like "associations_z0.100.0.asdf.minified"
+    return int(fn.split('.')[-3])
+    
 def extract_redshift(fn):
+    # looks like "associations_z0.100.0.asdf.minified" or "associations_z0.100.0.asdf"
     redshift = float('.'.join(fn.split("z")[-1].split('.')[:2]))
     return redshift
 
@@ -67,7 +72,7 @@ def load_merger(filenames, return_mass=False, trim=True):
 
 
 def simple_load(filenames, fields):
-
+    
     for i in range(len(filenames)):
         fn = filenames[i]
         print("File number %i of %i" % (i, len(filenames) - 1))
@@ -129,18 +134,25 @@ def simple_load(filenames, fields):
         del fdata
         f.close()
 
+    #cols = {col:np.empty(N_halos, dtype=user_dt[col]) for col in fields}
+    # TESTING
+    final = Table(final, copy=False)
     if "Progenitors" in fields:
         return final, final_progs
 
     return final
 
 
-def get_slab_halo(filenames):
-
-    slabs = extract_superslab(filenames)
+def get_slab_halo(filenames, minified):
+    # extract all slabs
+    if minified:
+        slabs = np.array([extract_superslab_minified(fn) for fn in filenames])
+    else:
+        slabs = np.array([extract_superslab(fn) for fn in filenames])
     n_slabs = len(slabs)
     N_halos_slabs = np.zeros(n_slabs, dtype=int)
 
+    # extract number of halos in each slab
     for i in range(len(filenames)):
         fn = filenames[i]
         print("File number %i of %i" % (i, len(filenames) - 1))
@@ -148,6 +160,7 @@ def get_slab_halo(filenames):
         N_halos = f.tree["data"]["HaloIndex"].shape[0]
         N_halos_slabs[i] = N_halos
 
+    # sort in slab order
     i_sort = np.argsort(slabs)
     slabs = slabs[i_sort]
     N_halos_slabs = N_halos_slabs[i_sort]
