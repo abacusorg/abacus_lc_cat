@@ -116,17 +116,20 @@ def unpack_inds(halo_ids):
     slab_number = ((halo_ids % id_factor - index) // slab_factor).astype(int)
     return slab_number, index
 
-def correct_inds(halo_ids, N_halos_slabs, slabs, start=0, stop=None):
+def correct_inds(halo_ids, N_halos_slabs, slabs, inds_fn):
     '''
     Reorder indices for given halo index array with 
     corresponding n halos and slabs for its time epoch
     '''
+
+    # number of halos in the loaded chunks
+    N_halos_load = np.array([N_halos_slabs[i] for i in inds_fn])
     
     # unpack slab and index for each halo
     slab_ids, ids = unpack_inds(halo_ids)
 
     # total number of halos in the slabs that we have loaded
-    N_halos = np.sum(N_halos_slabs[start:stop])
+    N_halos = np.sum(N_halos_load)
 
     # set up offset array for all files
     offsets_all = np.zeros(len(slabs), dtype=int)
@@ -134,7 +137,7 @@ def correct_inds(halo_ids, N_halos_slabs, slabs, start=0, stop=None):
 
     # select the halos belonging to given slab
     offset = 0
-    for i in range(start, stop):
+    for i in inds_fn:
         select = np.where(slab_ids == slabs[i])[0]
         #ids[select] += offsets_all[i]
         ids[select] += offset
@@ -142,16 +145,19 @@ def correct_inds(halo_ids, N_halos_slabs, slabs, start=0, stop=None):
 
     return ids
 
-def get_mt_info(fns, fields, minified, start=0, stop=None):
+def get_mt_info(fns, fields, minified, inds_fn):
     '''
     Load merger tree and progenitors information
     '''
 
+    # selected files to load
+    fns_load = [fns[i] for i in inds_fn]
+
     # if we are loading all progenitors and not just main
     if "Progenitors" in fields:
-        merger_tree, Progs = simple_load(fns[start:stop], fields=fields)
+        merger_tree, Progs = simple_load(fns_load, fields=fields)
     else:
-        merger_tree = simple_load(fns[start:stop], fields=fields)
+        merger_tree = simple_load(fns_load, fields=fields)
 
     # turn data into astropy table
     Merger = Table(merger_tree, copy=False)
@@ -362,11 +368,10 @@ def main(sim_name, z_start, z_stop, resume=False, plot=False):
         for k in range(n_chunks):
 
             # starting and finishing superslab chunks; 
-            start_this = k
-            stop_this = start_this+1#n_chunks
-            start_prev = start_this#(start_this-1)%n_chunks
-            stop_prev = start_this+1#(start_this+1)%n_chunks#n_chunks
+            inds_fn_this = [k]
+            inds_fn_prev = np.array([(k-1),k,(k+1)],dtype=int) % n_chunks
 
+            print("chunks loaded in this and previous redshifts = ",inds_fn_this, inds_fn_prev)
             # get merger tree data for this snapshot and for the previous one
             if "Progenitors" in fields_mt:
                 (
@@ -378,8 +383,7 @@ def main(sim_name, z_start, z_stop, resume=False, plot=False):
                     fns_this,
                     fields=fields_mt,
                     minified=minified,
-                    start=start_this,
-                    stop=stop_this,
+                    inds_fn=inds_fn_this
                 )
                 (
                     Merger_prev,
@@ -390,8 +394,7 @@ def main(sim_name, z_start, z_stop, resume=False, plot=False):
                     fns_prev,
                     fields=fields_mt,
                     minified=minified,
-                    start=start_prev,
-                    stop=stop_prev,
+                    inds_fn=inds_fn_prev,
                 )
             else:
                 (
@@ -402,8 +405,7 @@ def main(sim_name, z_start, z_stop, resume=False, plot=False):
                     fns_this,
                     fields=fields_mt,
                     minified=minified,
-                    start=start_this,
-                    stop=stop_this,
+                    inds_fn=inds_fn_this,
                 )
                 (
                     Merger_prev,
@@ -413,14 +415,13 @@ def main(sim_name, z_start, z_stop, resume=False, plot=False):
                     fns_prev,
                     fields=fields_mt,
                     minified=minified,
-                    start=start_prev,
-                    stop=stop_prev,
+                    inds_fn=inds_fn_prev,
                 )
 
 
             # number of halos in this step and previous step; this depends on the number of files requested
-            N_halos_this = np.sum(N_halos_slabs_this[start_this:stop_this])
-            N_halos_prev = np.sum(N_halos_slabs_prev[start_prev:stop_prev])
+            N_halos_this = np.sum(N_halos_slabs_this[inds_fn_this])
+            N_halos_prev = np.sum(N_halos_slabs_prev[inds_fn_prev])
             print("N_halos_this = ", N_halos_this)
             print("N_halos_prev = ", N_halos_prev)
             
@@ -433,36 +434,35 @@ def main(sim_name, z_start, z_stop, resume=False, plot=False):
 
             # no info is denoted by 0 or -999 (or regular if ineligible), but -999 messes with unpacking, so we set it to 0
             Merger_this['MainProgenitor'][noinfo_this] = 0
-                
+
             # rework the main progenitor and halo indices to return in proper order
             Merger_this['HaloIndex'] = correct_inds(
                 Merger_this['HaloIndex'],
                 N_halos_slabs_this,
                 slabs_this,
-                start=start_this,
-                stop=stop_this,
+                inds_fn_this,
             )
             Merger_this['MainProgenitor'] = correct_inds(
                 Merger_this['MainProgenitor'],
                 N_halos_slabs_prev,
                 slabs_prev,
-                start=start_prev,
-                stop=stop_prev,
+                inds_fn_prev,
             )
             Merger_prev['HaloIndex'] = correct_inds(
                 Merger_prev['HaloIndex'],
                 N_halos_slabs_prev,
                 slabs_prev,
-                start=start_prev,
-                stop=stop_prev,
+                inds_fn_prev,
             )
 
+            '''
             # TESTING
             # we only use this when loading incomplete merger trees because we're missing data
             if stop_this != n_chunks:
                 noinfo_this[Merger_this['MainProgenitor'] > N_halos_prev] = False
                 Merger_this['MainProgenitor'][Merger_this['MainProgenitor'] > N_halos_prev] = 0
-
+            '''
+            
             # loop over all origins
             for o in range(len(origins)):
 
@@ -480,8 +480,8 @@ def main(sim_name, z_start, z_stop, resume=False, plot=False):
                 Merger_prev_main_this = Merger_prev[Merger_this['MainProgenitor']].copy()
 
                 # if eligible, can be selected for light cone redshift catalog;
-                if i != ind_start or resume_flags[start_this, o]:
-                    eligibility_this = np.load(cat_lc_dir / "tmp" / ("eligibility_prev_z%4.3f_lc%d.%02d.npy"%(z_this, o, start_this)))
+                if i != ind_start or resume_flags[k, o]:
+                    eligibility_this = np.load(cat_lc_dir / "tmp" / ("eligibility_prev_z%4.3f_lc%d.%02d.npy"%(z_this, o, k)))
                 else:
                     eligibility_this = np.ones(N_halos_this, dtype=bool)
 
@@ -586,10 +586,10 @@ def main(sim_name, z_start, z_stop, resume=False, plot=False):
                 N_this_star_lc = np.sum(bool_star_this_info_lc)
                 N_this_noinfo_lc = np.sum(mask_lc_this_noinfo)
 
-                if i != ind_start or resume_flags[start_this, o]:
+                if i != ind_start or resume_flags[k, o]:
                     # load leftover halos from previously loaded redshift
-                    Merger_next = ascii.read(cat_lc_dir / "tmp" / ("Merger_next_z%4.3f_lc%d.%02d.ecsv"%(z_this,o,start_this)), format='ecsv')
-                    resume_flags[start_this, o] = False
+                    Merger_next = ascii.read(cat_lc_dir / "tmp" / ("Merger_next_z%4.3f_lc%d.%02d.ecsv"%(z_this,o,k)), format='ecsv')
+                    resume_flags[k, o] = False
 
                     # adding contributions from the previously loaded redshift
                     N_next_lc = len(Merger_next)
@@ -625,7 +625,7 @@ def main(sim_name, z_start, z_stop, resume=False, plot=False):
                 del Merger_this_noinfo_lc
                 
                 # record information from previously loaded redshift that was postponed
-                if i != ind_start or resume_flags[start_this, o]:
+                if i != ind_start or resume_flags[k, o]:
                     Merger_lc['InterpolatedPosition'][-N_next_lc:] = Merger_next['InterpolatedPosition']
                     Merger_lc['InterpolatedVelocity'][-N_next_lc:] = Merger_next['InterpolatedVelocity']
                     Merger_lc['InterpolatedComoving'][-N_next_lc:] = Merger_next['InterpolatedComoving']
@@ -636,8 +636,8 @@ def main(sim_name, z_start, z_stop, resume=False, plot=False):
                 os.makedirs(cat_lc_dir / ("z%.3f"%z_this), exist_ok=True)
 
                 # write table with interpolated information
-                save_asdf(Merger_lc, ("Merger_lc%d.%02d"%(o,start_this)), header, cat_lc_dir / ("z%.3f"%z_this))
-                #Merger_lc.write(cat_lc_dir / ("z%.3f"%z_this) / ("Merger_lc%d.%02d.ecsv"%(o,start_this)), format='ascii.ecsv') 
+                save_asdf(Merger_lc, ("Merger_lc%d.%02d"%(o,k)), header, cat_lc_dir / ("z%.3f"%z_this))
+                #Merger_lc.write(cat_lc_dir / ("z%.3f"%z_this) / ("Merger_lc%d.%02d.ecsv"%(o,k)), format='ascii.ecsv') 
 
                 # version 1: only the main progenitor is marked ineligible;
                 eligibility_prev[Merger_prev_main_this_info_lc['HaloIndex']] = False
@@ -708,11 +708,11 @@ def main(sim_name, z_start, z_stop, resume=False, plot=False):
                 gc.collect()
 
                 # save the current state so you can resume and load next iteration
-                np.save(cat_lc_dir / "tmp" / ("eligibility_prev_z%4.3f_lc%d.%02d.npy"%(z_this, o, start_this)), eligibility_prev)
+                np.save(cat_lc_dir / "tmp" / ("eligibility_prev_z%4.3f_lc%d.%02d.npy"%(z_this, o, k)), eligibility_prev)
 
                 # write as table the information about halos that are part of next loaded redshift
-                save_asdf(Merger_next, ("Merger_next_z%4.3f_lc%d.%02d.ecsv"%(z_this, o, start_this)), header, cat_lc_dir / "tmp")
-                #Merger_next.write(cat_lc_dir / "tmp" / ("Merger_next_z%4.3f_lc%d.%02d.ecsv"%(z_this, o, start_this)), format='ascii.ecsv')
+                save_asdf(Merger_next, ("Merger_next_z%4.3f_lc%d.%02d.ecsv"%(z_this, o, k)), header, cat_lc_dir / "tmp")
+                #Merger_next.write(cat_lc_dir / "tmp" / ("Merger_next_z%4.3f_lc%d.%02d.ecsv"%(z_this, o, k)), format='ascii.ecsv')
 
             del Merger_this, Merger_prev
 
