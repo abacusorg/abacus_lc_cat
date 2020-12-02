@@ -26,12 +26,15 @@ from astropy.table import Table
 
 from tools.merger import simple_load, get_slab_halo, extract_superslab, extract_superslab_minified
 from tools.aid_asdf import save_asdf
+from tools.read_headers import get_lc_info
 
 # these are probably just for testing; should be removed for production
 DEFAULTS = {}
 DEFAULTS['sim_name'] = "AbacusSummit_highbase_c000_ph100"  # AbacusSummit_base_c000_ph006
-DEFAULTS['merger_parent'] = Path("/mnt/gosling2/bigsims/merger")
-DEFAULTS['catalog_parent'] = Path("/mnt/gosling1/boryanah/light_cone_catalog/")
+#DEFAULTS['merger_parent'] = Path("/mnt/gosling2/bigsims/merger")
+DEFAULTS['merger_parent'] = Path("/global/project/projectdirs/desi/cosmosim/Abacus/merger")
+#DEFAULTS['catalog_parent'] = Path("/mnt/gosling1/boryanah/light_cone_catalog/")
+DEFAULTS['catalog_parent'] = Path("/global/cscratch1/sd/boryanah/light_cone_catalog/")
 DEFAULTS['z_start'] = 0.65  # 0.8 # 0.5
 DEFAULTS['z_stop'] = 0.65  # 1.25 # 0.8 # 0.5
 CONSTANTS = {'c': 299792.458}  # km/s, speed of light
@@ -151,7 +154,8 @@ def correct_inds(halo_ids, N_halos_slabs, slabs, inds_fn):
     if len(inds_fn) == 1: return ids
 
     '''
-    # TODO: might be slower than just the last loop below, ask Lehman
+    # an attempt to speed up code but might be slower than currently done
+    # TODO: there's a bug, ask Lehman (not necessary to fix)
     # determine if indices are contiguous in terms of their chunk number (np.unique will return slab_unique sorted)
     slab_unique, slab_first_ids = np.unique(slab_ids, return_index=True)
     contiguous = True
@@ -280,7 +284,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
     # location of the LC origins in Mpc/h
     origins = np.array(header['LightConeOrigins']).reshape(-1,3)
 
-    # TESTING
+    # just for testing with highbase. remove!
     origins /= 2.
     
     # directory where we save the final outputs
@@ -291,7 +295,11 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
     os.makedirs(cat_lc_dir / "tmp", exist_ok=True)
 
     # all redshifts, steps and comoving distances of light cones files; high z to low z
-    # LHG: these have to be recomputed per-sim. How is chi being determined? etaK from header?
+    # remove presaving after testing done (or make sure presaved can be matched with simulation)
+    if not os.path.exists("data_headers/coord_dist.npy") or not os.path.exists("data_headers/redshifts.npy"):
+        zs_all, steps, chis_all = get_lc_info("all_headers")
+        np.save("data_headers/redshifts.npy", zs_all)
+        np.save("data_headers/coord_dist.npy", chis_all)
     zs_all = np.load("data_headers/redshifts.npy")
     chis_all = np.load("data_headers/coord_dist.npy")
     zs_all[-1] = float("%.1f" % zs_all[-1])  # LHG: I guess this is trying to match up to some filename or something?
@@ -519,8 +527,10 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                     & (Merger_this_noinfo['ComovingDistance'] <= chi_this + delta_chi / 2.0)
                 )
 
-                # todo tuks not perfect for all cases
-                if np.sum(mask_lc_this_info) == 0 and np.sum(mask_lc_this_noinfo) == 0: continue
+                # spare the computer the effort and avert empty array errors
+                # TODO: perhaps revise, as sometimes we might have no halos in
+                # noinfo but some in info and vice versa
+                if np.sum(mask_lc_this_info) == 0 or np.sum(mask_lc_this_noinfo) == 0: continue
 
                 # percentage of objects that are part of this or previous snapshot
                 print(
@@ -648,25 +658,41 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
 
                 # write table with interpolated information
                 save_asdf(Merger_lc, ("Merger_lc%d.%02d"%(o,k)), header, cat_lc_dir / ("z%.3f"%z_this))
-                #Merger_lc.write(cat_lc_dir / ("z%.3f"%z_this) / ("Merger_lc%d.%02d.ecsv"%(o,k)), format='ascii.ecsv') 
 
-                # TODO: Are there bugs in here?
-                # version 1: only the main progenitor is marked ineligible;
+                # TODO: Need to make sure no bugs with eligibility, ask Lehman
+                # version 1: only the main progenitor is marked ineligible
+                # if halo belongs to this redshift catalog or the previous redshift catalog;
                 eligibility_prev[Merger_prev_main_this_info_lc['HaloIndex']] = False
 
-                # version 2: all progenitors are marked ineligible
-                # optimize with numba; halo_inds has zeros; combine progs with version 1
+                # version 2: all progenitors of halos belonging to this redshift catalog are marked ineligible 
+                # run version 1 AND 2 to mark ineligible Merger_next objects to avoid multiple entries
+                # optimize with numba if possible (ask Lehman)
+                # Note that some progenitor indices are zeros;
+                # For best result perhaps combine Progs with MainProgs 
                 if "Progenitors" in fields_mt:
                     nums = Merger_this_info_lc['NumProgenitors'][bool_star_this_info_lc]
                     starts = Merger_this_info_lc['StartProgenitors'][bool_star_this_info_lc]
-                    # for those halos that were marked here
-                    for j in range(np.sum(bool_star_this_info_lc)):
+                    # for testing purposes (remove in final version)
+                    main_progs = Merger_this_info_lc['HaloIndex'][bool_star_this_info_lc]
+                    # loop around halos that were marked belonging to this redshift catalog
+                    for j in range(N_this_star_lc):
+                        # select all progenitors
                         start = starts[j]
                         num = nums[j]
                         prog_inds = Progs_this[start : start + num]
-                        prog_inds = correct_inds(prog_inds, N_halos_slabs_prev, slabs_prev)
+
+                        # remove progenitors with no info
+                        prog_inds = progs_inds[prog_inds > 0]
+                        if len(prog_inds) == 0: continue
+
+                        # correct halo indices
+                        prog_inds = correct_inds(prog_inds, N_halos_slabs_prev, slabs_prev, inds_fn_prev)
                         halo_inds = Merger_prev['HaloIndex'][prog_inds]
-                        # if j < 100: print(halo_inds, halo_ind_next[j])
+
+                        # test output; remove in final version
+                        if j < 100: print(halo_inds, Merger_prev[main_progs[j]])
+
+                        # mark ineligible
                         eligibility_prev[halo_inds] = False
 
                 # information to keep for next redshift considered
