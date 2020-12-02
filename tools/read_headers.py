@@ -46,5 +46,3 @@ def main():
     #np.save("../data_headers/redshifts.npy",redshifts)
     #np.save("../data_headers/steps.npy",steps)
     #np.save("../data_headers/coord_dist.npy",coord_dist)
-
-main()

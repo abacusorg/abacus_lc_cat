@@ -32,10 +32,10 @@ from tools.read_headers import get_lc_info
 # these are probably just for testing; should be removed for production
 DEFAULTS = {}
 DEFAULTS['sim_name'] = "AbacusSummit_highbase_c000_ph100"  # AbacusSummit_base_c000_ph006
-#DEFAULTS['merger_parent'] = Path("/mnt/gosling2/bigsims/merger")
-DEFAULTS['merger_parent'] = Path("/global/project/projectdirs/desi/cosmosim/Abacus/merger")
-#DEFAULTS['catalog_parent'] = Path("/mnt/gosling1/boryanah/light_cone_catalog/")
-DEFAULTS['catalog_parent'] = Path("/global/cscratch1/sd/boryanah/light_cone_catalog/")
+DEFAULTS['merger_parent'] = Path("/mnt/gosling2/bigsims/merger")
+#DEFAULTS['merger_parent'] = Path("/global/project/projectdirs/desi/cosmosim/Abacus/merger")
+DEFAULTS['catalog_parent'] = Path("/mnt/gosling1/boryanah/light_cone_catalog/")
+#DEFAULTS['catalog_parent'] = Path("/global/cscratch1/sd/boryanah/light_cone_catalog/")
 DEFAULTS['z_start'] = 0.65  # 0.8 # 0.5
 DEFAULTS['z_stop'] = 0.65  # 1.25 # 0.8 # 0.5
 CONSTANTS = {'c': 299792.458}  # km/s, speed of light
@@ -510,7 +510,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                 
                 # if eligible, can be selected for light cone redshift catalog;
                 if i != ind_start or resume_flags[k, o]:
-                    eligibility_this = np.load(cat_lc_dir / "tmp" / ("eligibility_prev_z%4.3f_lc%d.%02d.npy"%(z_this, o, k)))
+                    eligibility_this = np.load(cat_lc_dir / "tmp" / sim_name / ("eligibility_prev_z%4.3f_lc%d.%02d.npy"%(z_this, o, k)))
                 else:
                     eligibility_this = np.ones(N_halos_this, dtype=bool)
                 
@@ -619,7 +619,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
 
                 if i != ind_start or resume_flags[k, o]:
                     # load leftover halos from previously loaded redshift
-                    Merger_next = ascii.read(cat_lc_dir / "tmp" / ("Merger_next_z%4.3f_lc%d.%02d.ecsv"%(z_this,o,k)), format='ecsv')
+                    Merger_next = ascii.read(cat_lc_dir / "tmp" / sim_name / ("Merger_next_z%4.3f_lc%d.%02d.ecsv"%(z_this,o,k)), format='ecsv')
                     resume_flags[k, o] = False
 
                     # adding contributions from the previously loaded redshift
@@ -763,23 +763,22 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                 for idx in inds_fn_prev:
                     eligibility_prev_idx = eligibility_prev[offset:offset+N_halos_slabs_prev[idx]]
                     try:
-                        eligibility_prev_old = np.load(cat_lc_dir / "tmp" / ("eligibility_prev_z%4.3f_lc%d.%02d.npy"%(z_prev, o, idx)))
+                        eligibility_prev_old = np.load(cat_lc_dir / "tmp" / sim_name / ("eligibility_prev_z%4.3f_lc%d.%02d.npy"%(z_prev, o, idx)))
                         eligibility_prev_idx = eligibility_prev_old & eligibility_prev_idx
                         print("Exists!")
                     except:
                         print("Doesn't exist")
                         pass
-                    np.save(cat_lc_dir / "tmp" / ("eligibility_prev_z%4.3f_lc%d.%02d.npy"%(z_prev, o, idx)), eligibility_prev_idx)
+                    np.save(cat_lc_dir / "tmp" / sim_name / ("eligibility_prev_z%4.3f_lc%d.%02d.npy"%(z_prev, o, idx)), eligibility_prev_idx)
                     offset += N_halos_slabs_prev[idx]
 
                 # write as table the information about halos that are part of next loaded redshift
-                save_asdf(Merger_next, ("Merger_next_z%4.3f_lc%d.%02d.ecsv"%(z_this, o, k)), header, cat_lc_dir / "tmp")
-                #Merger_next.write(cat_lc_dir / "tmp" / ("Merger_next_z%4.3f_lc%d.%02d.ecsv"%(z_this, o, k)), format='ascii.ecsv')
+                save_asdf(Merger_next, ("Merger_next_z%4.3f_lc%d.%02d.ecsv"%(z_this, o, k)), header, cat_lc_dir / "tmp" / sim_name)
 
                 # save redshift of catalog that is next to load and difference in comoving between this and prev
                 # TODO: save as txt file that gets appended to and then read the last line
                 with open(cat_lc_dir / "tmp" / sim_name / "tmp.log", "a") as f:
-                    f.writelines(["# Next iteration: \n", "z_prev = %.8f \n"%z_prev, "delta_chi = %.8f \n"%delta_chi, "light_cone = %d \n"o, "super_slab = %d \n"k])
+                    f.writelines(["# Next iteration: \n", "z_prev = %.8f \n"%z_prev, "delta_chi = %.8f \n"%delta_chi, "light_cone = %d \n"%o, "super_slab = %d \n"%k])
                 
             del Merger_this, Merger_prev
 
