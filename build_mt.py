@@ -150,6 +150,7 @@ def correct_inds(halo_ids, N_halos_slabs, slabs, inds_fn):
     # determine if unpacking halos for only one file (Merger_this['HaloIndex']) -- no need to offset 
     if len(inds_fn) == 1: return ids
 
+    '''
     # TODO: might be slower than just the last loop below, ask Lehman
     # determine if indices are contiguous in terms of their chunk number (np.unique will return slab_unique sorted)
     slab_unique, slab_first_ids = np.unique(slab_ids, return_index=True)
@@ -161,7 +162,7 @@ def correct_inds(halo_ids, N_halos_slabs, slabs, inds_fn):
         for i in range(len(slab_first_ids)):
             ids[N_halos_load[i]*i:N_halos_load[i]*(i+1)] += offsets[i]
         return ids
-        
+    ''' 
         
     # select the halos belonging to given slab
     for i, ind_fn in enumerate(inds_fn):
@@ -485,20 +486,12 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                 
                 # merger tree data of main progenitor halos corresponding to the halos in current snapshot
                 Merger_prev_main_this = Merger_prev[Merger_this['MainProgenitor']].copy()
-
-                print("max halo index and min mainprog")
-                print(np.max(Merger_prev_main_this['HaloIndex']))
-                print(np.min(Merger_this['MainProgenitor']))
                 
-                '''
                 # if eligible, can be selected for light cone redshift catalog;
                 if i != ind_start or resume_flags[k, o]:
                     eligibility_this = np.load(cat_lc_dir / "tmp" / ("eligibility_prev_z%4.3f_lc%d.%02d.npy"%(z_this, o, k)))
                 else:
                     eligibility_this = np.ones(N_halos_this, dtype=bool)
-                '''
-                # TESTING
-                eligibility_this = np.ones(N_halos_this, dtype=bool)
                 
                 # for a newly opened redshift, everyone is eligible to be part of the light cone catalog
                 eligibility_prev = np.ones(N_halos_prev, dtype=bool)
