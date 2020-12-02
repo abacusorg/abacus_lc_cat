@@ -23,6 +23,7 @@ import matplotlib.pyplot as plt
 import argparse
 import numba as nb
 from astropy.table import Table
+from astropy.io import ascii
 
 from tools.InputFile import InputFile
 from tools.merger import simple_load, get_slab_halo, extract_superslab, extract_superslab_minified
@@ -36,7 +37,7 @@ DEFAULTS['merger_parent'] = Path("/mnt/gosling2/bigsims/merger")
 #DEFAULTS['merger_parent'] = Path("/global/project/projectdirs/desi/cosmosim/Abacus/merger")
 DEFAULTS['catalog_parent'] = Path("/mnt/gosling1/boryanah/light_cone_catalog/")
 #DEFAULTS['catalog_parent'] = Path("/global/cscratch1/sd/boryanah/light_cone_catalog/")
-DEFAULTS['z_start'] = 0.65  # 0.8 # 0.5
+DEFAULTS['z_start'] = 0.5  # 0.8 # 0.5
 DEFAULTS['z_stop'] = 0.65  # 1.25 # 0.8 # 0.5
 CONSTANTS = {'c': 299792.458}  # km/s, speed of light
 
@@ -293,8 +294,8 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
     os.makedirs(cat_lc_dir, exist_ok=True)
 
     # directory where we save the current state if we want to resume
-    os.makedirs(cat_lc_dir / "tmp" / sim_name, exist_ok=True)
-    with open(cat_lc_dir / "tmp" / sim_name / "tmp.log", "a") as f:
+    os.makedirs(cat_lc_dir / "tmp", exist_ok=True)
+    with open(cat_lc_dir / "tmp" / "tmp.log", "a") as f:
         f.writelines(["# Starting light cone catalog construction in simulation %s \n"%sim_name])
     
     # all redshifts, steps and comoving distances of light cones files; high z to low z
@@ -323,22 +324,26 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
     n_chunks = len(list(merger_dir.glob("associations_z%4.3f.*.asdf"%zs_mt[0])))
     print("number of chunks = ",n_chunks)
 
+    # starting and finishing redshift indices indices
+    ind_start = np.argmin(np.abs(zs_mt - z_start))
+    ind_stop = np.argmin(np.abs(zs_mt - z_stop))
+
     if resume:
         # if user wants to resume from previous state, create padded array for marking whether chunk has been loaded
         resume_flags = np.ones((n_chunks, origins.shape[1]), dtype=bool)
         
         # previous redshift, distance between shells
-        infile = InputFile(cat_lc_dir / "tmp" / sim_name / "tmp.log")
+        infile = InputFile(cat_lc_dir / "tmp" / "tmp.log")
         z_this_tmp = infile.z_prev
         delta_chi_old = infile.delta_chi
         chunk = infile.super_slab
         assert (np.abs(n_chunks-1 - chunk) < 1.0e-6), "Your recorded state did not complete all chunks, can't resume from old"
         assert (np.abs(zs_mt[ind_start] - z_this_tmp) < 1.0e-6), "Your recorded state is not for the correct redshift, can't resume from old"
-        with open(cat_lc_dir / "tmp" / sim_name / "tmp.log", "a") as f:
+        with open(cat_lc_dir / "tmp" / "tmp.log", "a") as f:
             f.writelines(["# Resuming from redshift z = %4.3f \n"%z_this_tmp])
     else:
         # delete the exisiting temporary files
-        tmp_files = list((cat_lc_dir / "tmp" / sim_name).glob("*"))
+        tmp_files = list((cat_lc_dir / "tmp").glob("*"))
         for i in range(len(tmp_files)):
             os.unlink(str(tmp_files[i]))
         resume_flags = np.zeros((n_chunks, origins.shape[0]), dtype=bool)
@@ -354,10 +359,6 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
     # z2 = z_of_chi((0.5*Lbox-origin[0])*np.sqrt(2))
     # furthest point where all three boxes touch;
     z3 = z_of_chi((0.5 * Lbox - origins[0][0]) * np.sqrt(3))
-    
-    # corresponding indices
-    ind_start = np.argmin(np.abs(zs_mt - z_start))
-    ind_stop = np.argmin(np.abs(zs_mt - z_stop))
 
     # initialize difference between the conformal time of last two shells
     delta_chi_old = 0.0
@@ -510,7 +511,9 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                 
                 # if eligible, can be selected for light cone redshift catalog;
                 if i != ind_start or resume_flags[k, o]:
-                    eligibility_this = np.load(cat_lc_dir / "tmp" / sim_name / ("eligibility_prev_z%4.3f_lc%d.%02d.npy"%(z_this, o, k)))
+                    # dealing with the fact that these files may not exist for all origins and all chunks
+                    if os.path.exists(cat_lc_dir / "tmp" / ("eligibility_prev_z%4.3f_lc%d.%02d.npy"%(z_this, o, k))):
+                        eligibility_this = np.load(cat_lc_dir / "tmp" / ("eligibility_prev_z%4.3f_lc%d.%02d.npy"%(z_this, o, k)))
                 else:
                     eligibility_this = np.ones(N_halos_this, dtype=bool)
                 
@@ -571,7 +574,6 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
 
                     plt.legend()
                     plt.axis('equal')
-                    plt.savefig("this.png")
 
                     x = Merger_prev_main_this_info_lc['Position'][:,0]
                     
@@ -585,7 +587,6 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
 
                     plt.legend()
                     plt.axis('equal')
-                    plt.savefig("prev.png")
                     plt.show()
 
                 # select halos without mt info that have had a light cone crossing
@@ -618,13 +619,17 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                 N_this_noinfo_lc = np.sum(mask_lc_this_noinfo)
 
                 if i != ind_start or resume_flags[k, o]:
-                    # load leftover halos from previously loaded redshift
-                    Merger_next = ascii.read(cat_lc_dir / "tmp" / sim_name / ("Merger_next_z%4.3f_lc%d.%02d.ecsv"%(z_this,o,k)), format='ecsv')
-                    resume_flags[k, o] = False
+                    # cheap way to deal with the fact that sometimes we won't have information about all light cone origins for certain chunks and epochs
+                    if os.path.exists(cat_lc_dir / "tmp" / ("Merger_next_z%4.3f_lc%d.%02d.asdf"%(z_this,o,k))):
+                        # load leftover halos from previously loaded redshift
+                        with asdf.open(cat_lc_dir / "tmp" / ("Merger_next_z%4.3f_lc%d.%02d.asdf"%(z_this,o,k))) as f:
+                            Merger_next = f['data']
+                            resume_flags[k, o] = False
 
-                    # adding contributions from the previously loaded redshift
-                    N_next_lc = len(Merger_next)
-                    N_lc += N_next_lc
+                        # adding contributions from the previously loaded redshift
+                        N_next_lc = len(Merger_next['HaloIndex'])
+                    else:
+                        N_next_lc = 0
                 else:
                     N_next_lc = 0
 
@@ -657,11 +662,12 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                 
                 # record information from previously loaded redshift that was postponed
                 if i != ind_start or resume_flags[k, o]:
-                    Merger_lc['InterpolatedPosition'][-N_next_lc:] = Merger_next['InterpolatedPosition']
-                    Merger_lc['InterpolatedVelocity'][-N_next_lc:] = Merger_next['InterpolatedVelocity']
-                    Merger_lc['InterpolatedComoving'][-N_next_lc:] = Merger_next['InterpolatedComoving']
-                    Merger_lc['HaloIndex'][-N_next_lc:] = Merger_next['HaloIndex']
-                    del Merger_next
+                    if N_next_lc != 0:
+                        Merger_lc['InterpolatedPosition'][-N_next_lc:] = Merger_next['InterpolatedPosition']
+                        Merger_lc['InterpolatedVelocity'][-N_next_lc:] = Merger_next['InterpolatedVelocity']
+                        Merger_lc['InterpolatedComoving'][-N_next_lc:] = Merger_next['InterpolatedComoving']
+                        Merger_lc['HaloIndex'][-N_next_lc:] = Merger_next['HaloIndex']
+                        del Merger_next
 
                 # offset position to make light cone continuous
                 Merger_lc['InterpolatedPosition'] = offset_pos(Merger_lc['InterpolatedPosition'],ind_origin=o,all_origins=origins)
@@ -762,22 +768,22 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                 offset = 0
                 for idx in inds_fn_prev:
                     eligibility_prev_idx = eligibility_prev[offset:offset+N_halos_slabs_prev[idx]]
-                    try:
-                        eligibility_prev_old = np.load(cat_lc_dir / "tmp" / sim_name / ("eligibility_prev_z%4.3f_lc%d.%02d.npy"%(z_prev, o, idx)))
+                    # combine current information with previously existing
+                    if os.path.exists(cat_lc_dir / "tmp" / ("eligibility_prev_z%4.3f_lc%d.%02d.npy"%(z_prev, o, idx))):
+                        eligibility_prev_old = np.load(cat_lc_dir / "tmp" / ("eligibility_prev_z%4.3f_lc%d.%02d.npy"%(z_prev, o, idx)))
                         eligibility_prev_idx = eligibility_prev_old & eligibility_prev_idx
                         print("Exists!")
-                    except:
+                    else:
                         print("Doesn't exist")
-                        pass
-                    np.save(cat_lc_dir / "tmp" / sim_name / ("eligibility_prev_z%4.3f_lc%d.%02d.npy"%(z_prev, o, idx)), eligibility_prev_idx)
+                    np.save(cat_lc_dir / "tmp" / ("eligibility_prev_z%4.3f_lc%d.%02d.npy"%(z_prev, o, idx)), eligibility_prev_idx)
                     offset += N_halos_slabs_prev[idx]
 
                 # write as table the information about halos that are part of next loaded redshift
-                save_asdf(Merger_next, ("Merger_next_z%4.3f_lc%d.%02d.ecsv"%(z_this, o, k)), header, cat_lc_dir / "tmp" / sim_name)
+                save_asdf(Merger_next, ("Merger_next_z%4.3f_lc%d.%02d"%(z_prev, o, k)), header, cat_lc_dir / "tmp")
 
                 # save redshift of catalog that is next to load and difference in comoving between this and prev
                 # TODO: save as txt file that gets appended to and then read the last line
-                with open(cat_lc_dir / "tmp" / sim_name / "tmp.log", "a") as f:
+                with open(cat_lc_dir / "tmp" / "tmp.log", "a") as f:
                     f.writelines(["# Next iteration: \n", "z_prev = %.8f \n"%z_prev, "delta_chi = %.8f \n"%delta_chi, "light_cone = %d \n"%o, "super_slab = %d \n"%k])
                 
             del Merger_this, Merger_prev
