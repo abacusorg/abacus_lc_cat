@@ -30,7 +30,9 @@ from tools.aid_asdf import save_asdf
 # these are probably just for testing; should be removed for production
 DEFAULTS = {}
 DEFAULTS['sim_name'] = "AbacusSummit_highbase_c000_ph100"  # AbacusSummit_base_c000_ph006
-DEFAULTS['z_start'] = 0.3  # 0.8 # 0.5
+DEFAULTS['merger_parent'] = Path("/mnt/gosling2/bigsims/merger")
+DEFAULTS['catalog_parent'] = Path("/mnt/gosling1/boryanah/light_cone_catalog/")
+DEFAULTS['z_start'] = 0.65  # 0.8 # 0.5
 DEFAULTS['z_stop'] = 0.65  # 1.25 # 0.8 # 0.5
 CONSTANTS = {'c': 299792.458}  # km/s, speed of light
 
@@ -43,6 +45,18 @@ def reorder_by_slab(fns,minified):
     else:
         return sorted(fns, key=extract_superslab)
 
+def get_one_header(merger_dir):
+    '''
+    Get an example header by looking at one association
+    file in a merger directory
+    '''
+
+    # choose one of the merger tree files
+    fn = list(merger_dir.glob('associations*.asdf'))[0]
+    with asdf.open(fn) as af:
+        header = af['header']
+    return header
+    
 def get_zs_from_headers(snap_names):
     '''
     Read redshifts from merger tree files
@@ -130,18 +144,29 @@ def correct_inds(halo_ids, N_halos_slabs, slabs, inds_fn):
 
     # total number of halos in the slabs that we have loaded
     N_halos = np.sum(N_halos_load)
+    offsets = np.zeros(len(inds_fn), dtype=int)
+    offsets[1:] = np.cumsum(N_halos_load)[:-1]
+    
+    # determine if unpacking halos for only one file (Merger_this['HaloIndex']) -- no need to offset 
+    if len(inds_fn) == 1: return ids
 
-    # set up offset array for all files
-    offsets_all = np.zeros(len(slabs), dtype=int)
-    offsets_all[1:] = np.cumsum(N_halos_slabs)[:-1]
-
+    # TODO: might be slower than just the last loop below, ask Lehman
+    # determine if indices are contiguous in terms of their chunk number (np.unique will return slab_unique sorted)
+    slab_unique, slab_first_ids = np.unique(slab_ids, return_index=True)
+    contiguous = True
+    for i in range(len(slab_first_ids)):
+        if slab_first_ids[i] != offsets[np.argsort(inds_fn)][i] or slab_unique[i] != np.sort(inds_fn)[i]:
+            contiguous = False
+    if contiguous:
+        for i in range(len(slab_first_ids)):
+            ids[N_halos_load[i]*i:N_halos_load[i]*(i+1)] += offsets[i]
+        return ids
+        
+        
     # select the halos belonging to given slab
-    offset = 0
-    for i in inds_fn:
-        select = np.where(slab_ids == slabs[i])[0]
-        #ids[select] += offsets_all[i]
-        ids[select] += offset
-        offset += N_halos_slabs[i]
+    for i, ind_fn in enumerate(inds_fn):
+        select = np.where(slab_ids == slabs[ind_fn])[0]
+        ids[select] += offsets[i]
 
     return ids
 
@@ -178,13 +203,6 @@ def get_mt_info(fns, fields, minified, inds_fn):
 
     return Merger, N_halos_slabs, slabs
 
-def compute_comoving(pos,origin,Lbox=None):
-    '''
-    Compute comoving distance between observer and every halo (periodic if Lbox not None)
-    '''
-    com_dist = dist(pos,origin,L=Lbox)
-    return com_dist
-
 def solve_crossing(r1, r2, pos1, pos2, chi1, chi2, Lbox, origin):
     '''
     Solve when the crossing of the light cones occurs and the
@@ -211,8 +229,8 @@ def solve_crossing(r1, r2, pos1, pos2, chi1, chi2, Lbox, origin):
 
 
     # enforce boundary conditions by periodic wrapping
-    #pos_star[pos_star >= Lbox/2.] = pos_star[pos_star >= Lbox/2.] - Lbox
-    #pos_star[pos_star < -Lbox/2.] = pos_star[pos_star < -Lbox/2.] + Lbox
+    pos_star[pos_star >= Lbox/2.] = pos_star[pos_star >= Lbox/2.] - Lbox
+    pos_star[pos_star < -Lbox/2.] = pos_star[pos_star < -Lbox/2.] + Lbox
     
     # interpolated velocity [km/s]
     vel_star = v_avg * CONSTANTS['c']  # vel1+a_avg*(chi1-chi_star)
@@ -225,21 +243,19 @@ def solve_crossing(r1, r2, pos1, pos2, chi1, chi2, Lbox, origin):
     
     return chi_star, pos_star, vel_star, bool_star
 
-
-def get_one_header(merger_dir):
+def offset_pos(pos,ind_origin,all_origins):
     '''
-    Get an example header by looking at one association
-    file in a merger directory
+    Offset the interpolated positions to create continuous light cones
     '''
 
-    # choose one of the merger tree files
-    fn = list(merger_dir.glob('associations*.asdf'))[0]
-    with asdf.open(fn) as af:
-        header = af['header']
-    return header
+    # location of initial observer
+    first_observer = all_origins[0]
+    current_observer = all_origins[ind_origin]
+    offset = (first_observer-current_observer)
+    pos += offset
+    return pos
 
-
-def main(sim_name, z_start, z_stop, resume=False, plot=False):
+def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False, plot=False):
     '''
     Main function.
     The algorithm: for each merger tree epoch, for 
@@ -255,7 +271,6 @@ def main(sim_name, z_start, z_stop, resume=False, plot=False):
     merger epoch.  Can process in a rolling fashion.
     '''
     
-    merger_parent = Path("/mnt/gosling2/bigsims/merger")
     merger_dir = merger_parent / sim_name
     header = get_one_header(merger_dir)
     
@@ -264,8 +279,11 @@ def main(sim_name, z_start, z_stop, resume=False, plot=False):
     # location of the LC origins in Mpc/h
     origins = np.array(header['LightConeOrigins']).reshape(-1,3)
 
+    # TESTING
+    origins /= 2.
+    
     # directory where we save the final outputs
-    cat_lc_dir = Path("/mnt/gosling1/boryanah/light_cone_catalog/") / sim_name / "halos_light_cones/"
+    cat_lc_dir = catalog_parent / sim_name / "halos_light_cones/"
     os.makedirs(cat_lc_dir, exist_ok=True)
 
     # directory where we save the current state if we want to resume
@@ -454,37 +472,34 @@ def main(sim_name, z_start, z_stop, resume=False, plot=False):
                 slabs_prev,
                 inds_fn_prev,
             )
-
-            '''
-            # TESTING
-            # we only use this when loading incomplete merger trees because we're missing data
-            if stop_this != n_chunks:
-                noinfo_this[Merger_this['MainProgenitor'] > N_halos_prev] = False
-                Merger_this['MainProgenitor'][Merger_this['MainProgenitor'] > N_halos_prev] = 0
-            '''
             
             # loop over all origins
             for o in range(len(origins)):
 
                 # location of the observer
                 origin = origins[o]
-
-                # TESTING
-                origin /= 2.
                 
                 # comoving distance to observer
-                Merger_this['ComovingDistance'] = compute_comoving(Merger_this['Position'], origin)
-                Merger_prev['ComovingDistance'] = compute_comoving(Merger_prev['Position'], origin)
+                Merger_this['ComovingDistance'] = dist(Merger_this['Position'], origin)
+                Merger_prev['ComovingDistance'] = dist(Merger_prev['Position'], origin)
                 
                 # merger tree data of main progenitor halos corresponding to the halos in current snapshot
                 Merger_prev_main_this = Merger_prev[Merger_this['MainProgenitor']].copy()
 
+                print("max halo index and min mainprog")
+                print(np.max(Merger_prev_main_this['HaloIndex']))
+                print(np.min(Merger_this['MainProgenitor']))
+                
+                '''
                 # if eligible, can be selected for light cone redshift catalog;
                 if i != ind_start or resume_flags[k, o]:
                     eligibility_this = np.load(cat_lc_dir / "tmp" / ("eligibility_prev_z%4.3f_lc%d.%02d.npy"%(z_this, o, k)))
                 else:
                     eligibility_this = np.ones(N_halos_this, dtype=bool)
-
+                '''
+                # TESTING
+                eligibility_this = np.ones(N_halos_this, dtype=bool)
+                
                 # for a newly opened redshift, everyone is eligible to be part of the light cone catalog
                 eligibility_prev = np.ones(N_halos_prev, dtype=bool)
 
@@ -516,7 +531,7 @@ def main(sim_name, z_start, z_stop, resume=False, plot=False):
 
                 # percentage of objects that are part of this or previous snapshot
                 print(
-                    "percentage of halos in light cone with and without progenitor info = ",
+                    "percentage of halos in light cone %d with and without progenitor info = "%o,
                     np.sum(mask_lc_this_info) / len(mask_lc_this_info) * 100.0,
                     np.sum(mask_lc_this_noinfo) / len(mask_lc_this_noinfo) * 100.0,
                 )
@@ -526,8 +541,8 @@ def main(sim_name, z_start, z_stop, resume=False, plot=False):
                 Merger_prev_main_this_info_lc = Merger_prev_main_this_info[mask_lc_this_info]
 
                 if plot:
-                    x_min = -500.
-                    x_max = x_min+10.
+                    x_min = -Lbox/2.+k*(Lbox/n_chunks)
+                    x_max = x_min+(Lbox/n_chunks)
 
                     x = Merger_this_info_lc['Position'][:,0]
                     choice = (x > x_min) & (x < x_max)
@@ -631,7 +646,10 @@ def main(sim_name, z_start, z_stop, resume=False, plot=False):
                     Merger_lc['InterpolatedComoving'][-N_next_lc:] = Merger_next['InterpolatedComoving']
                     Merger_lc['HaloIndex'][-N_next_lc:] = Merger_next['HaloIndex']
                     del Merger_next
-                    
+
+                # offset position to make light cone continuous
+                Merger_lc['InterpolatedPosition'] = offset_pos(Merger_lc['InterpolatedPosition'],ind_origin=o,all_origins=origins)
+                                
                 # create directory for this redshift
                 os.makedirs(cat_lc_dir / ("z%.3f"%z_this), exist_ok=True)
 
@@ -639,6 +657,7 @@ def main(sim_name, z_start, z_stop, resume=False, plot=False):
                 save_asdf(Merger_lc, ("Merger_lc%d.%02d"%(o,k)), header, cat_lc_dir / ("z%.3f"%z_this))
                 #Merger_lc.write(cat_lc_dir / ("z%.3f"%z_this) / ("Merger_lc%d.%02d.ecsv"%(o,k)), format='ascii.ecsv') 
 
+                # TODO: Are there bugs in here?
                 # version 1: only the main progenitor is marked ineligible;
                 eligibility_prev[Merger_prev_main_this_info_lc['HaloIndex']] = False
 
@@ -677,17 +696,17 @@ def main(sim_name, z_start, z_stop, resume=False, plot=False):
                     pos_choice = Merger_lc['InterpolatedPosition']
 
                     # selecting thin slab
-                    pos_x_min = -490.0
-                    pos_x_max = -480.0
+                    pos_x_min = -Lbox/2.+k*(Lbox/n_chunks)
+                    pos_x_max = x_min+(Lbox/n_chunks)
 
                     ijk = 0
                     choice = (pos_choice[:, ijk] >= pos_x_min) & (pos_choice[:, ijk] < pos_x_max)
 
                     circle_this = plt.Circle(
-                        (origin[1], origin[2]), radius=chi_this, color="g", fill=False
+                        (origins[0][1], origins[0][2]), radius=chi_this, color="g", fill=False
                     )
                     circle_prev = plt.Circle(
-                        (origin[1], origin[2]), radius=chi_prev, color="r", fill=False
+                        (origins[0][1], origins[0][2]), radius=chi_prev, color="r", fill=False
                     )
 
                     # clear things for fresh plot
@@ -707,8 +726,19 @@ def main(sim_name, z_start, z_stop, resume=False, plot=False):
 
                 gc.collect()
 
-                # save the current state so you can resume and load next iteration
-                np.save(cat_lc_dir / "tmp" / ("eligibility_prev_z%4.3f_lc%d.%02d.npy"%(z_this, o, k)), eligibility_prev)
+                # split the eligibility array over three files for the three chunks it's made up of
+                offset = 0
+                for idx in inds_fn_prev:
+                    eligibility_prev_idx = eligibility_prev[offset:offset+N_halos_slabs_prev[idx]]
+                    try:
+                        eligibility_prev_old = np.load(cat_lc_dir / "tmp" / ("eligibility_prev_z%4.3f_lc%d.%02d.npy"%(z_prev, o, idx)))
+                        eligibility_prev_idx = eligibility_prev_old & eligibility_prev_idx
+                        print("Exists!")
+                    except:
+                        print("Doesn't exist")
+                        pass
+                    np.save(cat_lc_dir / "tmp" / ("eligibility_prev_z%4.3f_lc%d.%02d.npy"%(z_prev, o, idx)), eligibility_prev_idx)
+                    offset += N_halos_slabs_prev[idx]
 
                 # write as table the information about halos that are part of next loaded redshift
                 save_asdf(Merger_next, ("Merger_next_z%4.3f_lc%d.%02d.ecsv"%(z_this, o, k)), header, cat_lc_dir / "tmp")
@@ -739,6 +769,8 @@ if __name__ == '__main__':
     parser.add_argument('--sim_name', help='Simulation name', default=DEFAULTS['sim_name'])
     parser.add_argument('--z_start', help='Initial redshift where we start building the trees', default=DEFAULTS['z_start'])
     parser.add_argument('--z_stop', help='Final redshift (inclusive)', default=DEFAULTS['z_stop'])
+    parser.add_argument('--merger_parent', help='Merger tree directory', default=DEFAULTS['merger_parent'])
+    parser.add_argument('--catalog_parent', help='Light cone catalog directory', default=DEFAULTS['catalog_parent'])
     parser.add_argument('--resume', help='Resume the calculation from the checkpoint on disk', action='store_true')
     parser.add_argument('--plot', help='Want to show plots', action='store_true')
     
