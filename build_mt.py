@@ -24,6 +24,7 @@ import argparse
 import numba as nb
 from astropy.table import Table
 
+from tools.InputFile import InputFile
 from tools.merger import simple_load, get_slab_halo, extract_superslab, extract_superslab_minified
 from tools.aid_asdf import save_asdf
 from tools.read_headers import get_lc_info
@@ -292,8 +293,10 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
     os.makedirs(cat_lc_dir, exist_ok=True)
 
     # directory where we save the current state if we want to resume
-    os.makedirs(cat_lc_dir / "tmp", exist_ok=True)
-
+    os.makedirs(cat_lc_dir / "tmp" / sim_name, exist_ok=True)
+    with open(cat_lc_dir / "tmp" / sim_name / "tmp.log", "a") as f:
+        f.writelines(["# Starting light cone catalog construction in simulation %s \n"%sim_name])
+    
     # all redshifts, steps and comoving distances of light cones files; high z to low z
     # remove presaving after testing done (or make sure presaved can be matched with simulation)
     if not os.path.exists("data_headers/coord_dist.npy") or not os.path.exists("data_headers/redshifts.npy"):
@@ -325,10 +328,20 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
         resume_flags = np.ones((n_chunks, origins.shape[1]), dtype=bool)
         
         # previous redshift, distance between shells
-        z_this_tmp, delta_chi_old = np.load(cat_lc_dir / "tmp" / "z_prev_delta.npy")
+        infile = InputFile(cat_lc_dir / "tmp" / sim_name / "tmp.log")
+        z_this_tmp = infile.z_prev
+        delta_chi_old = infile.delta_chi
+        chunk = infile.super_slab
+        assert (np.abs(n_chunks-1 - chunk) < 1.0e-6), "Your recorded state did not complete all chunks, can't resume from old"
         assert (np.abs(zs_mt[ind_start] - z_this_tmp) < 1.0e-6), "Your recorded state is not for the correct redshift, can't resume from old"
+        with open(cat_lc_dir / "tmp" / sim_name / "tmp.log", "a") as f:
+            f.writelines(["# Resuming from redshift z = %4.3f \n"%z_this_tmp])
     else:
-        resume_flags = np.zeros((n_chunks, origins.shape[1]), dtype=bool)
+        # delete the exisiting temporary files
+        tmp_files = list((cat_lc_dir / "tmp" / sim_name).glob("*"))
+        for i in range(len(tmp_files)):
+            os.unlink(str(tmp_files[i]))
+        resume_flags = np.zeros((n_chunks, origins.shape[0]), dtype=bool)
 
     # fields to extract from the merger trees
     # fields_mt = ['HaloIndex','HaloMass','Position','MainProgenitor','Progenitors','NumProgenitors']
@@ -763,17 +776,15 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                 save_asdf(Merger_next, ("Merger_next_z%4.3f_lc%d.%02d.ecsv"%(z_this, o, k)), header, cat_lc_dir / "tmp")
                 #Merger_next.write(cat_lc_dir / "tmp" / ("Merger_next_z%4.3f_lc%d.%02d.ecsv"%(z_this, o, k)), format='ascii.ecsv')
 
+                # save redshift of catalog that is next to load and difference in comoving between this and prev
+                # TODO: save as txt file that gets appended to and then read the last line
+                with open(cat_lc_dir / "tmp" / sim_name / "tmp.log", "a") as f:
+                    f.writelines(["# Next iteration: \n", "z_prev = %.8f \n"%z_prev, "delta_chi = %.8f \n"%delta_chi, "light_cone = %d \n"o, "super_slab = %d \n"k])
+                
             del Merger_this, Merger_prev
 
         # update values for difference in comoving distance
         delta_chi_old = delta_chi
-
-        # save redshift of catalog that is next to load and difference in comoving between this and prev
-        # TODO:save as txt file that gets appended to and then read the last line
-        np.save(cat_lc_dir / "tmp" / "z_prev_delta.npy",
-            np.array([z_prev, delta_chi]),
-        )
-
 
 # dict_keys(['HaloIndex', 'HaloMass', 'HaloVmax', 'IsAssociated', 'IsPotentialSplit', 'MainProgenitor', 'MainProgenitorFrac', 'MainProgenitorPrec', 'MainProgenitorPrecFrac', 'NumProgenitors', 'Position', 'Progenitors'])
     
