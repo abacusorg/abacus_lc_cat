@@ -37,8 +37,8 @@ DEFAULTS['merger_parent'] = Path("/mnt/gosling2/bigsims/merger")
 #DEFAULTS['merger_parent'] = Path("/global/project/projectdirs/desi/cosmosim/Abacus/merger")
 DEFAULTS['catalog_parent'] = Path("/mnt/gosling1/boryanah/light_cone_catalog/")
 #DEFAULTS['catalog_parent'] = Path("/global/cscratch1/sd/boryanah/light_cone_catalog/")
-DEFAULTS['z_start'] = 0.5  # 0.8 # 0.5
-DEFAULTS['z_stop'] = 0.65  # 1.25 # 0.8 # 0.5
+DEFAULTS['z_start'] = 0.65  # 0.8 # 0.5
+DEFAULTS['z_stop'] = 0.72  # 1.25 # 0.8 # 0.5
 CONSTANTS = {'c': 299792.458}  # km/s, speed of light
 
 def reorder_by_slab(fns,minified):
@@ -514,6 +514,8 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                     # dealing with the fact that these files may not exist for all origins and all chunks
                     if os.path.exists(cat_lc_dir / "tmp" / ("eligibility_prev_z%4.3f_lc%d.%02d.npy"%(z_this, o, k))):
                         eligibility_this = np.load(cat_lc_dir / "tmp" / ("eligibility_prev_z%4.3f_lc%d.%02d.npy"%(z_this, o, k)))
+                    else:
+                        eligibility_this = np.ones(N_halos_this, dtype=bool)
                 else:
                     eligibility_this = np.ones(N_halos_this, dtype=bool)
                 
@@ -624,12 +626,12 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                         # load leftover halos from previously loaded redshift
                         with asdf.open(cat_lc_dir / "tmp" / ("Merger_next_z%4.3f_lc%d.%02d.asdf"%(z_this,o,k))) as f:
                             Merger_next = f['data']
-                            resume_flags[k, o] = False
 
                         # adding contributions from the previously loaded redshift
                         N_next_lc = len(Merger_next['HaloIndex'])
                     else:
                         N_next_lc = 0
+                    resume_flags[k, o] = False #changed
                 else:
                     N_next_lc = 0
 
@@ -659,9 +661,10 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                 Merger_lc['InterpolatedComoving'][N_this_star_lc:N_this_star_lc+N_this_noinfo_lc] = np.ones(Merger_this_noinfo_lc['Position'].shape[0])*chi_this
                 Merger_lc['HaloIndex'][N_this_star_lc:N_this_star_lc+N_this_noinfo_lc] = Merger_this_noinfo_lc['HaloIndex']
                 del Merger_this_noinfo_lc
-                
+
                 # record information from previously loaded redshift that was postponed
                 if i != ind_start or resume_flags[k, o]:
+                    print(i, ind_start, resume_flags[k,o], N_next_lc)
                     if N_next_lc != 0:
                         Merger_lc['InterpolatedPosition'][-N_next_lc:] = Merger_next['InterpolatedPosition']
                         Merger_lc['InterpolatedVelocity'][-N_next_lc:] = Merger_next['InterpolatedVelocity']
@@ -669,9 +672,10 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                         Merger_lc['HaloIndex'][-N_next_lc:] = Merger_next['HaloIndex']
                         del Merger_next
 
+                
                 # offset position to make light cone continuous
                 Merger_lc['InterpolatedPosition'] = offset_pos(Merger_lc['InterpolatedPosition'],ind_origin=o,all_origins=origins)
-                                
+                
                 # create directory for this redshift
                 os.makedirs(cat_lc_dir / ("z%.3f"%z_this), exist_ok=True)
 
@@ -683,6 +687,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                 # if halo belongs to this redshift catalog or the previous redshift catalog;
                 eligibility_prev[Merger_prev_main_this_info_lc['HaloIndex']] = False
 
+                
                 # version 2: all progenitors of halos belonging to this redshift catalog are marked ineligible 
                 # run version 1 AND 2 to mark ineligible Merger_next objects to avoid multiple entries
                 # optimize with numba if possible (ask Lehman)
@@ -763,7 +768,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                     plt.show()
 
                 gc.collect()
-
+                
                 # split the eligibility array over three files for the three chunks it's made up of
                 offset = 0
                 for idx in inds_fn_prev:
