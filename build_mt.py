@@ -631,7 +631,6 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                         N_next_lc = len(Merger_next['HaloIndex'])
                     else:
                         N_next_lc = 0
-                    resume_flags[k, o] = False #changed
                 else:
                     N_next_lc = 0
 
@@ -664,13 +663,13 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
 
                 # record information from previously loaded redshift that was postponed
                 if i != ind_start or resume_flags[k, o]:
-                    print(i, ind_start, resume_flags[k,o], N_next_lc)
                     if N_next_lc != 0:
-                        Merger_lc['InterpolatedPosition'][-N_next_lc:] = Merger_next['InterpolatedPosition']
-                        Merger_lc['InterpolatedVelocity'][-N_next_lc:] = Merger_next['InterpolatedVelocity']
-                        Merger_lc['InterpolatedComoving'][-N_next_lc:] = Merger_next['InterpolatedComoving']
-                        Merger_lc['HaloIndex'][-N_next_lc:] = Merger_next['HaloIndex']
+                        Merger_lc['InterpolatedPosition'][-N_next_lc:] = Merger_next['InterpolatedPosition']['data'][:]
+                        Merger_lc['InterpolatedVelocity'][-N_next_lc:] = Merger_next['InterpolatedVelocity']['data'][:]
+                        Merger_lc['InterpolatedComoving'][-N_next_lc:] = Merger_next['InterpolatedComoving']['data'][:]
+                        Merger_lc['HaloIndex'][-N_next_lc:] = Merger_next['HaloIndex']['data'][:]
                         del Merger_next
+                    resume_flags[k, o] = False
 
                 
                 # offset position to make light cone continuous
