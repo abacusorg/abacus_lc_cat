@@ -37,8 +37,8 @@ DEFAULTS['merger_parent'] = Path("/mnt/gosling2/bigsims/merger")
 #DEFAULTS['merger_parent'] = Path("/global/project/projectdirs/desi/cosmosim/Abacus/merger")
 DEFAULTS['catalog_parent'] = Path("/mnt/gosling1/boryanah/light_cone_catalog/")
 #DEFAULTS['catalog_parent'] = Path("/global/cscratch1/sd/boryanah/light_cone_catalog/")
-DEFAULTS['z_start'] = 0.65  # 0.8 # 0.5
-DEFAULTS['z_stop'] = 0.72  # 1.25 # 0.8 # 0.5
+DEFAULTS['z_start'] = 0.72  # 0.8 # 0.5
+DEFAULTS['z_stop'] = 0.8  # 1.25 # 0.8 # 0.5
 CONSTANTS = {'c': 299792.458}  # km/s, speed of light
 
 def reorder_by_slab(fns,minified):
@@ -624,7 +624,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                     # cheap way to deal with the fact that sometimes we won't have information about all light cone origins for certain chunks and epochs
                     if os.path.exists(cat_lc_dir / "tmp" / ("Merger_next_z%4.3f_lc%d.%02d.asdf"%(z_this,o,k))):
                         # load leftover halos from previously loaded redshift
-                        with asdf.open(cat_lc_dir / "tmp" / ("Merger_next_z%4.3f_lc%d.%02d.asdf"%(z_this,o,k))) as f:
+                        with asdf.open(cat_lc_dir / "tmp" / ("Merger_next_z%4.3f_lc%d.%02d.asdf"%(z_this,o,k)), lazy_load=True, copy_arrays=True) as f:
                             Merger_next = f['data']
 
                         # adding contributions from the previously loaded redshift
@@ -664,10 +664,10 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                 # record information from previously loaded redshift that was postponed
                 if i != ind_start or resume_flags[k, o]:
                     if N_next_lc != 0:
-                        Merger_lc['InterpolatedPosition'][-N_next_lc:] = Merger_next['InterpolatedPosition']['data'][:]
-                        Merger_lc['InterpolatedVelocity'][-N_next_lc:] = Merger_next['InterpolatedVelocity']['data'][:]
-                        Merger_lc['InterpolatedComoving'][-N_next_lc:] = Merger_next['InterpolatedComoving']['data'][:]
-                        Merger_lc['HaloIndex'][-N_next_lc:] = Merger_next['HaloIndex']['data'][:]
+                        Merger_lc['InterpolatedPosition'][-N_next_lc:] = Merger_next['InterpolatedPosition'][:]
+                        Merger_lc['InterpolatedVelocity'][-N_next_lc:] = Merger_next['InterpolatedVelocity'][:]
+                        Merger_lc['InterpolatedComoving'][-N_next_lc:] = Merger_next['InterpolatedComoving'][:]
+                        Merger_lc['HaloIndex'][-N_next_lc:] = Merger_next['HaloIndex'][:]
                         del Merger_next
                     resume_flags[k, o] = False
 
