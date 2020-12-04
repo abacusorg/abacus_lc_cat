@@ -156,13 +156,51 @@ def get_slab_halo(filenames, minified):
     for i in range(len(filenames)):
         fn = filenames[i]
         print("File number %i of %i" % (i, len(filenames) - 1))
-        f = asdf.open(fn, lazy_load=True, copy_arrays=True)
-        N_halos = f.tree["data"]["HaloIndex"].shape[0]
+        f = asdf.open(fn)
+        N_halos = f["data"]["HaloIndex"].shape[0]
         N_halos_slabs[i] = N_halos
-
+        f.close()
+        
     # sort in slab order
     i_sort = np.argsort(slabs)
     slabs = slabs[i_sort]
     N_halos_slabs = N_halos_slabs[i_sort]
 
     return N_halos_slabs, slabs
+
+def extract_origin(fn):
+    '''
+    Extract index of the light cone origin
+    example: 'Merger_lc1.02.asdf' should return 1
+    '''
+    origin = int(fn.split('lc')[-1].split('.')[0])
+    return origin
+
+def get_slab_origin_halo(filenames, minified):
+    # number of halos in each file
+    N_halos_slabs_origins = np.zeros(len(filenames), dtype=int)
+
+    # extract all slabs
+    slabs = np.array([extract_superslab(fn) for fn in filenames])
+
+    # extract all origins
+    origins = np.array([extract_origin(fn) for fn in filenames])
+    
+    # extract number of halos in each slab
+    for i in range(len(filenames)):
+        fn = filenames[i]
+        print("File number %i of %i" % (i, len(filenames) - 1))
+        f = asdf.open(fn)
+        N_halos = f["data"]["HaloIndex"].shape[0]
+        N_halos_slabs_origins[i] = N_halos
+        f.close()
+        
+    # sort in slab order
+    i_sort = np.argsort(slabs)
+    slabs = slabs[i_sort]
+    origins = origins[i_sort]
+    N_halos_slabs_origins = N_halos_slabs_origins[i_sort]
+
+    print(N_halos_slabs_origins, slabs, origins)
+    
+    return N_halos_slabs_origins, slabs, origins
