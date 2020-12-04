@@ -23,7 +23,6 @@ import matplotlib.pyplot as plt
 import argparse
 import numba as nb
 from astropy.table import Table
-from astropy.io import ascii
 
 from tools.InputFile import InputFile
 from tools.merger import simple_load, get_slab_halo, extract_superslab, extract_superslab_minified
@@ -287,7 +286,8 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
     origins = np.array(header['LightConeOrigins']).reshape(-1,3)
 
     # just for testing with highbase. remove!
-    origins /= 2.
+    if 'highbase' in sim_name:
+        origins /= 2.
     
     # directory where we save the final outputs
     cat_lc_dir = catalog_parent / sim_name / "halos_light_cones/"
@@ -806,8 +806,8 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=ArgParseFormatter)
     parser.add_argument('--sim_name', help='Simulation name', default=DEFAULTS['sim_name'])
-    parser.add_argument('--z_start', help='Initial redshift where we start building the trees', default=DEFAULTS['z_start'])
-    parser.add_argument('--z_stop', help='Final redshift (inclusive)', default=DEFAULTS['z_stop'])
+    parser.add_argument('--z_start', help='Initial redshift where we start building the trees', type=float, default=DEFAULTS['z_start'])
+    parser.add_argument('--z_stop', help='Final redshift (inclusive)', type=float, default=DEFAULTS['z_stop'])
     parser.add_argument('--merger_parent', help='Merger tree directory', default=DEFAULTS['merger_parent'])
     parser.add_argument('--catalog_parent', help='Light cone catalog directory', default=DEFAULTS['catalog_parent'])
     parser.add_argument('--resume', help='Resume the calculation from the checkpoint on disk', action='store_true')

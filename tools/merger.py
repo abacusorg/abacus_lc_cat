@@ -200,7 +200,5 @@ def get_slab_origin_halo(filenames, minified):
     slabs = slabs[i_sort]
     origins = origins[i_sort]
     N_halos_slabs_origins = N_halos_slabs_origins[i_sort]
-
-    print(N_halos_slabs_origins, slabs, origins)
     
     return N_halos_slabs_origins, slabs, origins

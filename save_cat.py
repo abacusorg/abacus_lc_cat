@@ -21,6 +21,7 @@ import numpy as np
 from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
 import argparse
+from astropy.table import Table
 
 from compaso_halo_catalog import CompaSOHaloCatalog
 from tools.aid_asdf import save_asdf, reindex_particles
@@ -38,7 +39,7 @@ DEFAULTS['catalog_parent'] = Path("/mnt/gosling1/boryanah/light_cone_catalog/")
 DEFAULTS['merger_parent'] = Path("/mnt/gosling2/bigsims/merger")
 #DEFAULTS['merger_parent'] = Path("/global/project/projectdirs/desi/cosmosim/Abacus/merger")
 DEFAULTS['z_start'] = 0.45  # 0.8 # 0.5
-DEFAULTS['z_stop'] = 0.65  # 1.25 # 0.8 # 0.5
+DEFAULTS['z_stop'] = 0.5  # 1.25 # 0.8 # 0.5
 CONSTANTS = {'c': 299792.458}  # km/s, speed of light
 
 def extract_redshift(fn):
@@ -46,7 +47,7 @@ def extract_redshift(fn):
     redshift = float(fn.split('z')[-1])
     return redshift
     
-def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_parent, resume=False, plot=False):
+def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_parent):
 
     # directory where the CompaSO halo catalogs are saved
     cat_dir = compaso_parent / sim_name / "halos"
@@ -57,7 +58,6 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
     # obtain the redshifts of the CompaSO catalogs
     redshifts = glob.glob(os.path.join(cat_dir,"z*"))
     zs_cat = [extract_redshift(redshifts[i]) for i in range(len(redshifts))]
-    print(zs_cat)
     
     # directory where we save the final outputs
     cat_lc_dir = catalog_parent / sim_name / "halos_light_cones"
@@ -113,7 +113,6 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
 
         # slab indices and number of halos per slab
         slabs, N_halo_slabs = get_slab_halo(merger_fns, minified=False)
-        print(slabs, N_halo_slabs)
 
         # names of the light cone merger tree file for this redshift
         merger_lc_fns = list((cat_lc_dir / ("z%.3f"%z_mt)).glob("Merger_lc*.asdf"))
@@ -121,47 +120,67 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
             merger_lc_fns[counter] = str(merger_lc_fns[counter])
 
         # slab indices, origins and number of halos per slab
-        slabs_lc, origins_lc, N_halo_slabs_lc = get_slab_origin_halo(merger_lc_fns, minified=False)
-        print(slabs_lc, origins_lc, N_halo_slabs_lc)
-            
-        # loop over each chunk
-        offset = 0
-        for k in range(n_chunks):
-            # loop over each observer origin
-            for o in range(3):
+        N_halo_slabs_lc, slabs_lc, origins_lc = get_slab_origin_halo(merger_lc_fns, minified=False)
+
+        # total number of halos in this light cone redshift
+        N_lc = np.sum(N_halo_slabs_lc)
+        print("total number of lc halos = ", N_lc)
+
+        Merger_lc = Table(
+            {'HaloIndex':np.zeros(N_lc, dtype=np.int64),
+             'InterpolatedVelocity': np.zeros(N_lc, dtype=(np.float32,3)),
+             'InterpolatedPosition': np.zeros(N_lc, dtype=(np.float32,3)),
+             'InterpolatedComoving': np.zeros(N_lc, dtype=np.float32)
+            }
+        )
         
+        # initialize index for filling halo information
+        start = 0; file_no = 0
+
+        # offset for correcting halo indices
+        offset = 0
+
+        # loop over each chunk
+        for k in range(n_chunks):
+            # origins for which information is available
+            origins_k = origins_lc[slabs_lc == k]
+
+            # loop over each observer origin
+            for o in origins_k:
                 # load the light cone arrays
                 with asdf.open(cat_lc_dir / ("z%.3f"%z_mt) / ("Merger_lc%d.%02d.asdf"%(o,k)), lazy_load=True, copy_arrays=True) as f:
                     merger_lc = f['data']
 
+                # number of halos in this file
+                num = N_halo_slabs_lc[file_no]
+                file_no += 1
+
+                # the files should be congruent
+                N_halo_lc = len(merger_lc['HaloIndex'])
+                assert N_halo_lc == num, "file order is messed up"
+
                 # correct halo indices
                 merger_lc['HaloIndex'][:] += offset
 
-                # combine with information for other halos in same redshift catalog
-                try:
-                    Merger_lc = np.hstack((Merger_lc,merger_lc))
-                except:
-                    Merger_lc = merger_lc.copy()
-
-                print("keys = ",Merger_lc.keys(),merger_lc.keys())
-                    
-                # print to check numbers
-                N_halo_lc = len(merger_lc['HaloIndex'])
-                N_halo_lc_total = len(Merger_lc['HaloIndex'][:])
-                print(N_halo_lc, N_halo_lc_total)
+                # translate information from this file to the complete array
+                for key in Merger_lc.keys():
+                    Merger_lc[key][start:start+num] = merger_lc[key][:]
+                
+                # add halos in this file
+                start += num
 
             # offset all halos in given chunk
             offset += N_halo_slabs[k]
-            
+
         # unpack the fields of the merger tree catalogs
         halo_ind_lc = Merger_lc['HaloIndex'][:]
         pos_interp_lc = Merger_lc['InterpolatedPosition'][:]
         vel_interp_lc = Merger_lc['InterpolatedVelocity'][:]
         chi_interp_lc = Merger_lc['InterpolatedComoving'][:]
         del Merger_lc
-                
+
         # catalog directory 
-        catdir = cat_dir / "z%.3f"%z_cat
+        catdir = str(cat_dir / ("z%.3f"%z_cat))
 
         # load halo catalog, setting unpack to False for speed
         cat = CompaSOHaloCatalog(catdir, load_subsamples='A_halo_pid', fields=fields_cat, unpack_bits = False)
@@ -171,37 +190,45 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
         header = cat.header
         N_halos = len(cat.halos)
         print("N_halos = ",N_halos)
-
-        # load the pid, set unpack_bits to True if you want other information
+        
+        # load the particle ids
         pid = cat.subsamples['pid']
+        del cat
+
+        # reindex npstart and npout for the new catalogs
         npstart = halo_table['npstartA']
         npout = halo_table['npoutA']
-        pid_new, npstart_new, npout_new = reindex_particles(pid,npstart,npout)        
-        pid_table = np.empty(len(pid_new),dtype=[('pid',pid_new.dtype)])
-        pid_table['pid'] = pid_new
+        pid_new, npstart_new, npout_new = reindex_particles(pid,npstart,npout)
         halo_table['npstartA'] = npstart_new
         halo_table['npoutA'] = npout_new
+        del pid, npstart, npout
+        del npstart_new, npout_new
+        
+        # create particle array
+        pid_table = Table({'pid': np.zeros(len(pid_new), pid_new.dtype)})
+        pid_table['pid'] = pid_new
+        del pid_new
 
         # isolate halos that did not have interpolation and get the velocity from the halo info files
         not_interp = (np.sum(np.abs(vel_interp_lc),axis=1) - 0.) < 1.e-6
         vel_interp_lc[not_interp] = halo_table['v_L2com'][not_interp]
         print("percentage not interpolated = ", 100.*np.sum(not_interp)/len(not_interp))
-
+        print("mean, min, max chi = ", np.mean(chi_interp_lc), np.min(chi_interp_lc), np.max(chi_interp_lc))
+        
         # append new fields
         halo_table['index_halo'] = halo_ind_lc
         halo_table['pos_interp'] = pos_interp_lc
         halo_table['vel_interp'] = vel_interp_lc
         halo_table['redshift_interp'] = z_of_chi(chi_interp_lc)
-
+        del halo_ind_lc, pos_interp_lc, vel_interp_lc, not_interp, chi_interp_lc
+        
         # save to files
-        save_asdf(halo_table, "halo_info_lc", header, cat_lc_dir / "z%4.3f"%z_mt)
-        save_asdf(pid_table, "pid_lc", header, cat_lc_dir / "z%4.3f"%z_mt)
-
+        save_asdf(halo_table, "halo_info_lc", header, cat_lc_dir / ("z%4.3f"%z_mt))
+        save_asdf(pid_table, "pid_lc", header, cat_lc_dir / ("z%4.3f"%z_mt))
         
         # delete things at the end
-        del pid, pid_new, pid_table, npstart, npout, npstart_new, npout_new
+        del pid_table
         del halo_table
-        del cat
 
         gc.collect()
             
@@ -215,13 +242,11 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=ArgParseFormatter)
     parser.add_argument('--sim_name', help='Simulation name', default=DEFAULTS['sim_name'])
-    parser.add_argument('--z_start', help='Initial redshift where we start building the trees', default=DEFAULTS['z_start'])
-    parser.add_argument('--z_stop', help='Final redshift (inclusive)', default=DEFAULTS['z_stop'])
+    parser.add_argument('--z_start', help='Initial redshift where we start building the trees', type=float, default=DEFAULTS['z_start'])
+    parser.add_argument('--z_stop', help='Final redshift (inclusive)', type=float, default=DEFAULTS['z_stop'])
     parser.add_argument('--compaso_parent', help='CompaSO directory', default=DEFAULTS['compaso_parent'])
     parser.add_argument('--catalog_parent', help='Light cone catalog directory', default=DEFAULTS['catalog_parent'])
     parser.add_argument('--merger_parent', help='Merger tree directory', default=DEFAULTS['merger_parent'])
-    parser.add_argument('--resume', help='Resume the calculation from the checkpoint on disk', action='store_true')
-    parser.add_argument('--plot', help='Want to show plots', action='store_true')
     
     args = vars(parser.parse_args())
     main(**args)

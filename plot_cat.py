@@ -1,11 +1,13 @@
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import asdf
 from scipy.interpolate import interp1d
 
 # simulation name
-sim_name = "AbacusSummit_base_c000_ph006"
-#sim_name = "AbacusSummit_highbase_c000_ph100"
+#sim_name = "AbacusSummit_base_c000_ph006"
+sim_name = "AbacusSummit_highbase_c000_ph100"
 
 # directory where we save the final outputs
 cat_lc_dir = "/mnt/gosling1/boryanah/light_cone_catalog/"+sim_name+"/halos_light_cones/"
@@ -19,13 +21,16 @@ zs_all[-1] = np.float('%.1f'%zs_all[-1])
 chi_of_z = interp1d(zs_all,chis_all)
 z_of_chi = interp1d(chis_all,zs_all)
 
-x_min = -1000
-x_max = x_min+10.
+if 'highbase' not in sim_name:
+    x_min = -1000
+    x_max = x_min+10.
+else:
+    x_min = -450
+    x_max = x_min+10.
 
 # choice of redshift
 
 # base
-
 #z = 0.5
 #z = 0.576
 #z = 0.651
@@ -38,7 +43,7 @@ z = 0.726
 #z = 1.179
 
 # highbase
-'''
+
 z = 0.300
 z = 0.351
 z = 0.400
@@ -46,7 +51,8 @@ z = 0.450
 z = 0.500 #mildly weird
 z = 0.577
 z = 0.652
-'''
+z = 0.8
+
 
 file_type = 'halo_info'
 #file_type = 'pid_rv'
@@ -102,4 +108,5 @@ choice = (x > x_min) & (x < x_max)
 plt.scatter(y[choice],z[choice],s=0.1,alpha=1.)
 #plt.scatter(y,z,s=0.01,alpha=1.)
 plt.axis('equal')
+plt.savefig('test.png')
 plt.show()
