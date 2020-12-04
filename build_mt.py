@@ -26,7 +26,7 @@ from astropy.table import Table
 from astropy.io import ascii
 
 from tools.InputFile import InputFile
-from tools.merger import simple_load, get_slab_halo, extract_superslab, extract_superslab_minified
+from tools.merger import simple_load, get_halos_per_slab, extract_superslab, extract_superslab_minified
 from tools.aid_asdf import save_asdf
 from tools.read_headers import get_lc_info
 
@@ -177,38 +177,29 @@ def correct_inds(halo_ids, N_halos_slabs, slabs, inds_fn):
 
     return ids
 
-def get_mt_info(fns, fields, minified, inds_fn):
+def get_mt_info(fns_load, fields, minified):
     '''
     Load merger tree and progenitors information
     '''
-
-    # selected files to load
-    fns_load = [fns[i] for i in inds_fn]
-
-    # if we are loading all progenitors and not just main
-    if "Progenitors" in fields:
-        merger_tree, Progs = simple_load(fns_load, fields=fields)
-    else:
-        merger_tree = simple_load(fns_load, fields=fields)
-
-    # turn data into astropy table
-    Merger = Table(merger_tree, copy=False)
-    Merger.add_column('ComovingDistance', copy=False)
+    
+    data = simple_load(fns_load, fields=fields)
+    merger = data['merger']
     
     # get number of halos in each slab and number of slabs
-    N_halos_slabs, slabs = get_slab_halo(fns, minified)
+    # TODO: simple_load() could return this, but there's a use for this function standalone elsewhere
+    # TODO: LHG is unsure if the order returned by get_halos_per_slab() matches that returned by simple_load(), and if that matters
+    halos_per_slab = get_halos_per_slab(fns, minified)
 
     # if loading all progenitors
     if "Progenitors" in fields:
-        num_progs = merger_tree["NumProgenitors"]
+        num_progs = merger["NumProgenitors"]
         # get an array with the starting indices of the progenitors array
-        start_progs = np.zeros(merger_tree.shape, dtype=int)
+        start_progs = np.empty(len(merger), dtype=int)
+        start_progs[0] = 0
         start_progs[1:] = num_progs.cumsum()[:-1]
-        Merger.add_column(start_progs, name='StartProgenitors', copy=False)
-        
-        return Merger, Progs, N_halos_slabs, slabs,
+        merger.add_column(start_progs, name='StartProgenitors', copy=False)
 
-    return Merger, N_halos_slabs, slabs
+    return data, halos_per_slab
 
 def solve_crossing(r1, r2, pos1, pos2, chi1, chi2, Lbox, origin):
     '''
@@ -378,24 +369,20 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
         print("comoving distance between this and previous snapshot = ", delta_chi)
 
         # read merger trees file names at this and previous snapshot from minified version 
-        fns_this = merger_dir.glob(f'associations_z{z_this:4.3f}.*.asdf.minified')
-        fns_prev = merger_dir.glob(f'associations_z{z_prev:4.3f}.*.asdf.minified')
-        fns_this = list(fns_this)
-        fns_prev = list(fns_prev)
+        # LHG: do we need to support both minified and non-minified separately? I thought all the data was in the minifted format now.
+        fns_this = list(merger_dir.glob(f'associations_z{z_this:4.3f}.*.asdf.minified'))
+        fns_prev = list(merger_dir.glob(f'associations_z{z_prev:4.3f}.*.asdf.minified'))
         minified = True
 
-        # if minified files not available,  load the regular files
+        # if minified files not available, load the regular files
         if len(list(fns_this)) == 0 or len(list(fns_prev)) == 0:
-            fns_this = merger_dir.glob(f'associations_z{z_this:4.3f}.*.asdf')
-            fns_prev = merger_dir.glob(f'associations_z{z_prev:4.3f}.*.asdf')
-            fns_this = list(fns_this)
-            fns_prev = list(fns_prev)
+            fns_this = list(merger_dir.glob(f'associations_z{z_this:4.3f}.*.asdf'))
+            fns_prev = list(merger_dir.glob(f'associations_z{z_prev:4.3f}.*.asdf'))
             minified = False
 
         # turn file names into strings
-        for counter in range(len(fns_this)):
-            fns_this[counter] = str(fns_this[counter])
-            fns_prev[counter] = str(fns_prev[counter])
+        fns_this = [str(f) for f in fns_this]
+        fns_prev = [str(f) for f in fns_prev]
 
         # number of merger tree files
         print("number of files = ", len(fns_this), len(fns_prev))
@@ -404,61 +391,33 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
         # reorder file names by super slab number
         fns_this = reorder_by_slab(fns_this,minified)
         fns_prev = reorder_by_slab(fns_prev,minified)
+        
+        # maybe we want to support resuming from arbitrary superslab
+        first_ss = 0
+        
+        # We're going to be loading slabs in a rolling fashion:
+        # reading the "high" slab at the leading edge, discarding the trailing "low" slab
+        # and moving the mid to low. But first we need to read all three to prime the queue
+        mt_prev = {}  # indexed by slab num
+        mt_prev[(first_ss-1)%n_chunks] = get_mt_info(fns_prev[(first_ss-1)%n_chunks], fields=fields_mt, minified=minified)
+        mt_prev[first_ss] = get_mt_info(fns_prev[first_ss], fields=fields_mt, minified=minified)
 
         # for each chunk
-        for k in range(n_chunks):
+        for k in range(first_ss,n_chunks):
+            # starting and finishing superslab chunks
+            klow = (k-1)%n_chunks
+            khigh = (k+1)%n_chunks
+            
+            # Slide down by one
+            if (klow-1)%n_chunks in mt_prev:
+                del mt_prev[(klow-1)%n_chunks]
+            mt_prev[khigh] = get_mt_info(fns_prev[khigh], fields=fields_mt, minified=minified)
 
-            # starting and finishing superslab chunks; 
-            inds_fn_this = [k]
-            inds_fn_prev = np.array([(k-1),k,(k+1)],dtype=int) % n_chunks
-
-            print("chunks loaded in this and previous redshifts = ",inds_fn_this, inds_fn_prev)
+            print(f"Loaded chunk {k} in this redshift, and {tuple(mt_prev)} in previous")
             # get merger tree data for this snapshot and for the previous one
-            if "Progenitors" in fields_mt:
-                (
-                    Merger_this,
-                    Progs_this,
-                    N_halos_slabs_this,
-                    slabs_this,
-                ) = get_mt_info(
-                    fns_this,
-                    fields=fields_mt,
-                    minified=minified,
-                    inds_fn=inds_fn_this
-                )
-                (
-                    Merger_prev,
-                    Progs_prev,
-                    N_halos_slabs_prev,
-                    slabs_prev
-                ) = get_mt_info(
-                    fns_prev,
-                    fields=fields_mt,
-                    minified=minified,
-                    inds_fn=inds_fn_prev,
-                )
-            else:
-                (
-                    Merger_this,
-                    N_halos_slabs_this,
-                    slabs_this,
-                ) = get_mt_info(
-                    fns_this,
-                    fields=fields_mt,
-                    minified=minified,
-                    inds_fn=inds_fn_this,
-                )
-                (
-                    Merger_prev,
-                    N_halos_slabs_prev,
-                    slabs_prev,
-                ) = get_mt_info(
-                    fns_prev,
-                    fields=fields_mt,
-                    minified=minified,
-                    inds_fn=inds_fn_prev,
-                )
-
+            mt_data_this, halos_per_slab_this = get_mt_info(fns_this[k], fields=fields_mt, minified=minified)
+            
+            # ======== LHG: haven't edited below here
 
             # number of halos in this step and previous step; this depends on the number of files requested
             N_halos_this = np.sum(N_halos_slabs_this[inds_fn_this])

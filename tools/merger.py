@@ -72,78 +72,68 @@ def load_merger(filenames, return_mass=False, trim=True):
 
 
 def simple_load(filenames, fields):
+    if type(filenames) is str:
+        filenames = [filenames]
     
-    for i in range(len(filenames)):
-        fn = filenames[i]
-        print("File number %i of %i" % (i, len(filenames) - 1))
+    do_prog = 'Progenitors' in fields
+    
+    Ntot = 0
+    dtypes = {}
+    
+    if do_prog:
+        N_prog_tot = 0
+        fields.remove('Progenitors')  # treat specially
+    
+    for fn in filenames:
+        with asdf.open(fn) as af:
+            # Peek at the first field to get the total length
+            # If the lengths of fields don't match up, that will be an error later
+            Ntot += len(af['data'][fields[0]])
+            
+            for field in fields:
+                if field not in dtypes:
+                    dtypes[field] = af['data'][field].dtype
+            
+            if do_prog:
+                N_prog_tot += len(af['data']['Progenitors'])
+                
+    # Make the empty tables
+    t = Table({f:np.empty(Ntot, dtype=dtypes[f]) for f in fields}, copy=False)
+    if do_prog:
+        p = Table({'Progenitors':np.empty(N_prog_tot, dtype=np.int64)}, copy=False)
+    
+    # Fill the data into the empty tables
+    j = 0
+    jp = 0
+    for i, fn in enumerate(filenames):
+        print(f"File number {i+1:d} of {len(filenames)}")
         f = asdf.open(fn, lazy_load=True, copy_arrays=True)
         fdata = f['data']
-
-        N_halos = fdata[fields[0]].shape[0]
-        num_progs_cum = 0
-        if i == 0:
-
-            dtypes = []
-            for field in fields:
-                dtype = fdata[field].dtype
-                try:
-                    shape = fdata[field].shape[1]
-                    dtype = (dtype, shape)
-                except:
-                    pass
-                if field != "Progenitors":
-                    dtypes.append((field, dtype))
-
-                if field == "Progenitors":
-                    final_progs = fdata["Progenitors"]
-                    try:
-                        num_progs = fdata["NumProgenitors"] + num_progs_cum
-                    except:
-                        print(
-                            "You need to also request 'NumProgenitors' if requesting the 'Progenitors' field"
-                        )
-                        exit()
-                    num_progs_cum += np.sum(num_progs)
-
-            final = np.empty(N_halos, dtype=dtypes)
-            for field in fields:
-                if "Progenitors" != field:
-                    final[field] = fdata[field]
-
-            if "Progenitors" in fields:
-                final["NumProgenitors"] = num_progs
-
-        else:
-            new = np.empty(N_halos, dtype=dtypes)
-            for field in fields:
-
-                if field != "Progenitors":
-                    new[field] = fdata[field]
-
-                if field == "Progenitors":
-                    progs = fdata["Progenitors"]
-                    final_progs = np.hstack((final_progs, progs))
-
-                    num_progs = fdata["NumProgenitors"] + num_progs_cum
-                    num_progs_cum += np.sum(num_progs)
-
-            if "Progenitors" in fields:
-                new["NumProgenitors"] = num_progs
-
-            final = np.hstack((final, new))
-        del fdata
-        f.close()
-
-    #cols = {col:np.empty(N_halos, dtype=user_dt[col]) for col in fields}
-    # TESTING
-    final = Table(final, copy=False)
-    if "Progenitors" in fields:
-        return final, final_progs
-
-    return final
+        thisN = len(fdata[fields[0]])
+        
+        for field in fields:
+            # Insert the data into the next slot in the table
+            t[field][j:j+thisN] = fdata[field]
+            
+        if do_prog:
+            thisNp = len(fdata['Progenitors'])
+            p['Progenitors'][jp:jp+thisNp] = fdata['Progenitors']
+            jp += thisNp
+            
+        j += thisN
+    
+    # Should have filled the whole table!
+    assert j == Ntot
+    
+    ret = dict(merger=t)
+    if do_prog:
+        ret['progenitors'] = p
+        assert jp == N_prog_tot
+    
+    return ret
 
 
-def get_slab_halo(filenames, minified):
+def get_halos_per_slab(filenames, minified):
     # extract all slabs
     if minified:
         slabs = np.array([extract_superslab_minified(fn) for fn in filenames])
@@ -153,11 +143,10 @@ def get_slab_halo(filenames, minified):
     N_halos_slabs = np.zeros(n_slabs, dtype=int)
 
     # extract number of halos in each slab
-    for i in range(len(filenames)):
-        fn = filenames[i]
+    for i,fn in enumerate(filenames):
         print("File number %i of %i" % (i, len(filenames) - 1))
         f = asdf.open(fn, lazy_load=True, copy_arrays=True)
-        N_halos = f.tree["data"]["HaloIndex"].shape[0]
+        N_halos = len(f["data"]["HaloIndex"])
         N_halos_slabs[i] = N_halos
 
     # sort in slab order
@@ -165,4 +154,4 @@ def get_slab_halo(filenames, minified):
     slabs = slabs[i_sort]
     N_halos_slabs = N_halos_slabs[i_sort]
 
-    return N_halos_slabs, slabs
+    return dict(zip(slabs, N_halos_slabs))
