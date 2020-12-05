@@ -21,13 +21,13 @@ import numpy as np
 from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
 import argparse
-import numba as nb
 from astropy.table import Table
 
 from tools.InputFile import InputFile
-from tools.merger import simple_load, get_slab_halo, extract_superslab, extract_superslab_minified
+from tools.merger import simple_load, get_zs_from_headers, get_slab_halo, get_one_header, unpack_inds, pack_inds, reorder_by_slab
 from tools.aid_asdf import save_asdf
 from tools.read_headers import get_lc_info
+from tools.compute_dist import dist
 
 # these are probably just for testing; should be removed for production
 DEFAULTS = {}
@@ -36,103 +36,9 @@ DEFAULTS['merger_parent'] = Path("/mnt/gosling2/bigsims/merger")
 #DEFAULTS['merger_parent'] = Path("/global/project/projectdirs/desi/cosmosim/Abacus/merger")
 DEFAULTS['catalog_parent'] = Path("/mnt/gosling1/boryanah/light_cone_catalog/")
 #DEFAULTS['catalog_parent'] = Path("/global/cscratch1/sd/boryanah/light_cone_catalog/")
-DEFAULTS['z_start'] = 0.72  # 0.8 # 0.5
-DEFAULTS['z_stop'] = 0.8  # 1.25 # 0.8 # 0.5
+DEFAULTS['z_start'] = 0.5
+DEFAULTS['z_stop'] = 0.8
 CONSTANTS = {'c': 299792.458}  # km/s, speed of light
-
-def reorder_by_slab(fns,minified):
-    '''
-    Reorder filenames in terms of their slab number
-    '''
-    if minified:
-        return sorted(fns, key=extract_superslab_minified)
-    else:
-        return sorted(fns, key=extract_superslab)
-
-def get_one_header(merger_dir):
-    '''
-    Get an example header by looking at one association
-    file in a merger directory
-    '''
-
-    # choose one of the merger tree files
-    fn = list(merger_dir.glob('associations*.asdf'))[0]
-    with asdf.open(fn) as af:
-        header = af['header']
-    return header
-    
-def get_zs_from_headers(snap_names):
-    '''
-    Read redshifts from merger tree files
-    '''
-    
-    zs = np.zeros(len(snap_names))
-    for i in range(len(snap_names)):
-        snap_name = snap_names[i]
-        with asdf.open(snap_name) as f:
-            zs[i] = np.float(f["header"]["Redshift"])
-    return zs
-
-@nb.njit
-def dist(pos1, pos2, L=None):
-    '''
-    Calculate L2 norm distance between a set of points
-    and either a reference point or another set of points.
-    Optionally includes periodicity.
-    
-    Parameters
-    ----------
-    pos1: ndarray of shape (N,m)
-        A set of points
-    pos2: ndarray of shape (N,m) or (m,) or (1,m)
-        A single point or set of points
-    L: float, optional
-        The box size. Will do a periodic wrap if given.
-    
-    Returns
-    -------
-    dist: ndarray of shape (N,)
-        The distances between pos1 and pos2
-    '''
-    
-    # read dimension of data
-    N, nd = pos1.shape
-    
-    # allow pos2 to be a single point
-    pos2 = np.atleast_2d(pos2)
-    assert pos2.shape[-1] == nd
-    broadcast = len(pos2) == 1
-        
-    dist = np.empty(N, dtype=pos1.dtype)
-    
-    i2 = 0
-    for i in range(N):
-        delta = 0.
-        for j in range(nd):
-            dx = pos1[i][j] - pos2[i2][j]
-            if L is not None:
-                if dx >= L/2:
-                    dx -= L
-                elif dx < -L/2:
-                    dx += L
-            delta += dx*dx
-        dist[i] = np.sqrt(delta)
-        if not broadcast:
-            i2 += 1
-    return dist
-
-def unpack_inds(halo_ids):
-    '''
-    Unpack indices in Sownak's format of Nslice*1e12 
-    + superSlabNum*1e9 + halo_position_superSlab
-    '''
-    
-    # obtain slab number and index within slab
-    id_factor = int(1e12)
-    slab_factor = int(1e9)
-    index = (halo_ids % slab_factor).astype(int)
-    slab_number = ((halo_ids % id_factor - index) // slab_factor).astype(int)
-    return slab_number, index
 
 def correct_inds(halo_ids, N_halos_slabs, slabs, inds_fn):
     '''
@@ -168,7 +74,7 @@ def correct_inds(halo_ids, N_halos_slabs, slabs, inds_fn):
             ids[N_halos_load[i]*i:N_halos_load[i]*(i+1)] += offsets[i]
         return ids
     ''' 
-        
+
     # select the halos belonging to given slab
     for i, ind_fn in enumerate(inds_fn):
         select = np.where(slab_ids == slabs[ind_fn])[0]
@@ -241,6 +147,9 @@ def solve_crossing(r1, r2, pos1, pos2, chi1, chi2, Lbox, origin):
     # interpolated velocity [km/s]
     vel_star = v_avg * CONSTANTS['c']  # vel1+a_avg*(chi1-chi_star)
 
+    #vel_star = dx/deta = dr/dt − H(t)r -> r is real space coord dr/dt = vel_star + a H(t) x 
+    # 'Htime', 'HubbleNow', 'HubbleTimeGyr', 'HubbleTimeHGyr'
+    
     # mark True if closer to chi2 (this snapshot)
     bool_star = np.abs(chi1 - chi_star) > np.abs(chi2 - chi_star)
 
@@ -279,6 +188,9 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
     
     merger_dir = merger_parent / sim_name
     header = get_one_header(merger_dir)
+
+    print(header.keys())
+    quit()
     
     # simulation parameters
     Lbox = header['BoxSize']
@@ -311,7 +223,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
     # get functions relating chi and z
     chi_of_z = interp1d(zs_all, chis_all)
     z_of_chi = interp1d(chis_all, zs_all)
-
+    
     # more accurate, slightly slower
     if not os.path.exists("data/zs_mt.npy"):
         # all merger tree snapshots and corresponding redshifts
@@ -489,6 +401,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                 slabs_prev,
                 inds_fn_prev,
             )
+            # maybe don't change
             Merger_prev['HaloIndex'] = correct_inds(
                 Merger_prev['HaloIndex'],
                 N_halos_slabs_prev,
@@ -661,6 +574,9 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                 Merger_lc['HaloIndex'][N_this_star_lc:N_this_star_lc+N_this_noinfo_lc] = Merger_this_noinfo_lc['HaloIndex']
                 del Merger_this_noinfo_lc
 
+                # pack halo indices for all halos but those in Merger_next
+                Merger_lc['HaloIndex'][:(N_this_star_lc + N_this_noinfo_lc)] = pack_inds(Merger_lc['HaloIndex'][:(N_this_star_lc + N_this_noinfo_lc)], k)
+                
                 # record information from previously loaded redshift that was postponed
                 if i != ind_start or resume_flags[k, o]:
                     if N_next_lc != 0:
@@ -670,18 +586,17 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                         Merger_lc['HaloIndex'][-N_next_lc:] = Merger_next['HaloIndex'][:]
                         del Merger_next
                     resume_flags[k, o] = False
-
                 
                 # offset position to make light cone continuous
                 Merger_lc['InterpolatedPosition'] = offset_pos(Merger_lc['InterpolatedPosition'],ind_origin=o,all_origins=origins)
-                
+
                 # create directory for this redshift
                 os.makedirs(cat_lc_dir / ("z%.3f"%z_this), exist_ok=True)
 
                 # write table with interpolated information
                 save_asdf(Merger_lc, ("Merger_lc%d.%02d"%(o,k)), header, cat_lc_dir / ("z%.3f"%z_this))
-
-                # TODO: Need to make sure no bugs with eligibility, ask Lehman
+                
+                # TODO: Need to make sure no bugs with eligibility
                 # version 1: only the main progenitor is marked ineligible
                 # if halo belongs to this redshift catalog or the previous redshift catalog;
                 eligibility_prev[Merger_prev_main_this_info_lc['HaloIndex']] = False
@@ -767,6 +682,15 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                     plt.show()
 
                 gc.collect()
+
+                # pack halo indices for the halos in Merger_next
+                offset = 0
+                for idx in inds_fn_prev:
+                    print("k, idx = ",k,idx)
+                    choice_idx = (offset <= Merger_next['HaloIndex'][:]) & (Merger_next['HaloIndex'][:] < offset+N_halos_slabs_prev[idx])
+                    Merger_next['HaloIndex'][choice_idx] = pack_inds(Merger_next['HaloIndex'][choice_idx]-offset, idx)
+                    offset += N_halos_slabs_prev[idx]
+                
                 
                 # split the eligibility array over three files for the three chunks it's made up of
                 offset = 0
@@ -786,7 +710,6 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                 save_asdf(Merger_next, ("Merger_next_z%4.3f_lc%d.%02d"%(z_prev, o, k)), header, cat_lc_dir / "tmp")
 
                 # save redshift of catalog that is next to load and difference in comoving between this and prev
-                # TODO: save as txt file that gets appended to and then read the last line
                 with open(cat_lc_dir / "tmp" / "tmp.log", "a") as f:
                     f.writelines(["# Next iteration: \n", "z_prev = %.8f \n"%z_prev, "delta_chi = %.8f \n"%delta_chi, "light_cone = %d \n"%o, "super_slab = %d \n"%k])
                 

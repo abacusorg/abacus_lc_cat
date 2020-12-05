@@ -13,7 +13,7 @@ Note: use python3.6 on alan (conflicts with packages)
 
 # Outstanding questions:
 
-in build: incorporate main progenitor as well as progenitors; check condition for falling into light cone
+in build: incorporate main progenitor as well as progenitors; check condition for falling into light cone; the way you compute the interpolated velocity: might be a factor of a missing; chunk 32 is missing in 0.726 base 000 006
 
 in save: use the clean CompaSO catalogs; save all fields in the catalogs; interpolation of the velocities (currently using average velocity between snapshots)
 

@@ -34,6 +34,8 @@ def get_lc_info(header_dir):
         coord_dist[i] = infile.CoordinateDistanceHMpc
     return redshifts, steps, coord_dist
 
+
+
 def main():
     # location where all headers for sim are saved
     header_dir = Path("all_headers")

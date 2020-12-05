@@ -25,7 +25,7 @@ if 'highbase' not in sim_name:
     x_min = -1000
     x_max = x_min+10.
 else:
-    x_min = -450
+    x_min = -500
     x_max = x_min+10.
 
 # choice of redshift
@@ -48,14 +48,14 @@ z = 0.300
 z = 0.351
 z = 0.400
 z = 0.450
-z = 0.500 #mildly weird
+z = 0.500
 z = 0.577
 z = 0.652
+z = 0.728
 z = 0.8
 
-
-file_type = 'halo_info'
-#file_type = 'pid_rv'
+#file_type = 'halo_info'
+file_type = 'pid_rv'
 #file_type = 'table_lc'
 
 if file_type == 'halo_info':

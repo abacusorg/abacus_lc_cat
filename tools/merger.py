@@ -6,7 +6,6 @@ from astropy.table import Table
 
 # todo: can speed up by using info about how many halos instead concatenating
 
-
 def extract_superslab(fn):
     # looks like "associations_z0.100.0.asdf"
     return int(fn.split('.')[-2])
@@ -20,6 +19,61 @@ def extract_redshift(fn):
     redshift = float('.'.join(fn.split("z")[-1].split('.')[:2]))
     return redshift
 
+def get_zs_from_headers(snap_names):
+    '''
+    Read redshifts from merger tree files
+    '''
+    
+    zs = np.zeros(len(snap_names))
+    for i in range(len(snap_names)):
+        snap_name = snap_names[i]
+        with asdf.open(snap_name) as f:
+            zs[i] = np.float(f["header"]["Redshift"])
+    return zs
+
+def get_one_header(merger_dir):
+    '''
+    Get an example header by looking at one association
+    file in a merger directory
+    '''
+
+    # choose one of the merger tree files
+    fn = list(merger_dir.glob('associations*.asdf'))[0]
+    with asdf.open(fn) as af:
+        header = af['header']
+    return header
+
+def unpack_inds(halo_ids):
+    '''
+    Unpack indices in Sownak's format of Nslice*1e12 
+    + superSlabNum*1e9 + halo_position_superSlab
+    '''
+    
+    # obtain slab number and index within slab
+    id_factor = int(1e12)
+    slab_factor = int(1e9)
+    index = (halo_ids % slab_factor).astype(int)
+    slab_number = ((halo_ids % id_factor - index) // slab_factor).astype(int)
+    return slab_number, index
+
+def pack_inds(halo_ids, slab_ids):
+    '''
+    Pack indices in Sownak's format of Nslice*1e12 
+    + superSlabNum*1e9 + halo_position_superSlab
+    '''
+    # just as a place holder
+    slice_ids = 0
+    halo_ids = slab_ids*1e9 + halo_ids
+    return halo_ids
+
+def reorder_by_slab(fns,minified):
+    '''
+    Reorder filenames in terms of their slab number
+    '''
+    if minified:
+        return sorted(fns, key=extract_superslab_minified)
+    else:
+        return sorted(fns, key=extract_superslab)
 
 def load_merger(filenames, return_mass=False, trim=True):
     for i in range(len(filenames)):
