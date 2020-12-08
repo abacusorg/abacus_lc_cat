@@ -128,3 +128,100 @@ def match_unsrt(arr1, arr2, arr2_sorted=False, arr2_index=None):
     ptr = where(ptr>= 0, ind[ptr], -1)
 
     return ptr
+
+
+import numpy as np
+import numba
+
+@numba.njit()
+def match_halo_pids_to_lc_rvint(nsubsamp, hpid, rvint, lcpid):
+    '''
+    Given that we have a list of halos that are definitely in the light cone,
+    match their subsample PIDs to light cone particle PIDs in a sorted "zipper".
+    Record the RVint of matched particles, and the halo ID, as we go.  Then,
+    at the end, partition the matches on
+    
+    TODO: this may rearrange the list of subsample PIDs within a halo. Do we
+    need to preserve the order, because we save the densest as the first,
+    for example?
+    
+    Parameters
+    ----------
+    nsubsamp: ndarray of int, shape (H,)
+        Number of subsample PIDs per halo, providing the association of
+        halo to PID. `sum(nsubsamp)` should equal `N`, the length of `hpid`.
+    hpid: ndarray of int, shape (N,)
+        An array of halo subsample particle PIDs, indexed by nsubsamp.
+    rvint: ndarray of int, shape (M,3)
+        An array of pos & vel of the light cone particles, stored as RVint,
+        and row-matched to `lcpid`.
+    lcpid: ndarray of int, shape (M,)
+        Light cone particle PIDs, row-matched to `rvint`.
+    
+    Returns
+    -------
+    nmatch: ndarray of int, shape (H,)
+        An array like `nsubsamp` that provides the assocation of halo
+        to rvint. `sum(nmatch_per_halo)` should equal `L`.
+        In a perfect world, if every particle has a match, then this
+        array is completely identical to `nsubsamp`.
+    hrvint: ndarray of int, shape (L,)
+        Array of RVints for the halo particles, in the same order as
+        `haloid` (so grouped by halo)
+    '''
+    
+    H = len(nsubsamp)
+    N = len(hpid)
+    assert nsubsamp.sum() == N
+    
+    haloids = np.repeat(np.arange(H), nsubsamp)
+    
+    # put halo particles in pid order
+    hord = np.argsort(hpid)
+    hpid = hpid[hord]
+    haloids = haloids[hord]
+    
+    # put lc particles in pid order too
+    M = len(lcpid)
+    lord = np.argsort(lcpid)
+    lcpid = lcpid[lord]
+    rvint = rvint[lord]
+    
+    # this will store the results
+    # we'll allocate as if we're going to find a match for everything,
+    # but will truncate the length to the used amount
+    hrvint = np.empty((N,3), dtype=rvint.dtype)
+    hrvint_hids = np.empty(N, dtype=haloids.dtype)
+    
+    j = 0
+    nfound = 0  # running total of matches
+    for i in range(N):
+        this_pid = hpid[i]
+        while lcpid[j] < this_pid:
+            j += 1
+        if lcpid[j] == this_pid:
+            # match!
+            hrvint[nfound] = rvint[j]
+            hrvint_hids[nfound] = haloids[i]
+            nfound += 1
+            j += 1
+    
+    # now truncate to the actual length found
+    assert nfound <= N
+    hrvint = hrvint[:nfound]
+    hrvint_hids = hrvint_hids[:nfound]
+    
+    # partition the results on the haloid
+    iord = np.argsort(hrvint_hids)
+    hrvint = hrvint[iord]
+    hrvint_hids = hrvint_hids[iord]
+    
+    # one more pass to count nmatch per halo
+    # TODO: not super optimized, probably doesn't matter
+    nmatch = np.zeros(H, dtype=nsubsamp.dtype)
+    for i in range(nfound):
+        nmatch[hrvint_hids[i]] += 1
+        
+    assert nmatch.sum() == len(hrvint)
+    
+    return nmatch, hrvint
