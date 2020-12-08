@@ -14,7 +14,7 @@ zs_mt = np.load("data/zs_mt.npy")
 cat_lc_dir = "/mnt/gosling1/boryanah/light_cone_catalog/"+sim_name+"/halos_light_cones/"
 
 # initial redshift where we start building the trees
-z_start = 0.8#0.5
+z_start = 0.5
 z_stop = 0.8
 ind_start = np.argmin(np.abs(zs_mt-z_start))
 ind_stop = np.argmin(np.abs(zs_mt-z_stop))

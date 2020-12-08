@@ -25,7 +25,7 @@ from astropy.table import Table
 
 from compaso_halo_catalog import CompaSOHaloCatalog
 from tools.aid_asdf import save_asdf, reindex_pid, reindex_pid_pos
-from tools.merger import simple_load, get_slab_halo, get_zs_from_headers, get_slab_origin_halo, extract_superslab, extract_superslab_minified, unpack_inds
+from tools.merger import simple_load, get_halos_per_slab, get_zs_from_headers, get_halos_per_slab_origin, extract_superslab, extract_superslab_minified, unpack_inds
 
 # TODO: copy all halo fields (just get rid of fields=fields_cat)
 
@@ -126,7 +126,7 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
             merger_fns[counter] = str(merger_fns[counter])
 
         # slab indices and number of halos per slab
-        N_halo_slabs, slabs = get_slab_halo(merger_fns, minified=False)
+        N_halo_slabs, slabs = get_halos_per_slab(merger_fns, minified=False)
         
         # names of the light cone merger tree file for this redshift
         merger_lc_fns = list((cat_lc_dir / ("z%.3f"%z_mt)).glob("Merger_lc*.asdf"))
@@ -134,7 +134,7 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
             merger_lc_fns[counter] = str(merger_lc_fns[counter])
 
         # slab indices, origins and number of halos per slab
-        N_halo_slabs_lc, slabs_lc, origins_lc = get_slab_origin_halo(merger_lc_fns, minified=False)
+        N_halo_slabs_lc, slabs_lc, origins_lc = get_halos_per_slab_origin(merger_lc_fns, minified=False)
 
         # total number of halos in this light cone redshift
         N_lc = np.sum(N_halo_slabs_lc)

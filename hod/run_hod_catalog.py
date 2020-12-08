@@ -28,6 +28,8 @@ seeds = [0]
 
 sim_slices = sorted(glob.glob(os.path.join(cat_lc_dir,'z*')))
 redshifts = [extract_redshift(sim_slices[i]) for i in range(len(sim_slices))]
+# TESTING
+redshifts = redshifts[:5]
 print("redshifts = ",redshifts)
 
 # load header to read parameters
@@ -83,16 +85,16 @@ if __name__ == "__main__":
 
     # HOD parameters
     # median redshift of the sample
-    z_0 = 0.8
+    z_0 = 0.6#0.8
     a_0 = 1./(1+z_0)
 
     # base HOD parameters
-    logM_cut = 13.27
-    logM1 = 14.30
+    logM_cut = 12.27
+    logM1 = 13.30
     sigma = 0.78
     alpha = 1.09
     kappa = 0.21
-    params['model_no'] = 1
+    params['model_no'] = 2
     
     # first derivative parameters
     logM_cut_prime = 1.

@@ -172,7 +172,7 @@ def gen_cent(halo_ids, halo_pos, halo_vels, halo_vrms, halo_mass, halo_zs, desig
     vel_cents[:, 2] += extra_vlos[mask_cents] # add on velocity bias
     mass_cents = halo_mass[mask_cents]
     ids_cents = halo_ids[mask_cents]
-    z_cents = halo_zs[mask_cents]
+    zs_cents = halo_zs[mask_cents]
     
     # rsd
     if rsd:

@@ -1,6 +1,8 @@
 import numpy as np
 import glob
 import os
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 import numpy as np
@@ -9,9 +11,10 @@ import os
 import matplotlib.pyplot as plt
 
 # hod model number
-model_no = 1
+model_no = 2#1
 
-z_in = 0.800#0.576
+z_in = 0.800
+z_in = 0.576
 
 # HOD directory on alan
 hod_dir = "/mnt/gosling1/boryanah/light_cone_catalog/AbacusSummit_base_c000_ph006/HOD/z%.3f/model_%d_rsd/"%(z_in,model_no)
@@ -33,7 +36,7 @@ def load_gals(fns,dim):
     return gal_arr
 
 sats_arr = load_gals(sats_fns,dim=9)
-cent_arr = load_gals(cent_fns,dim=8)
+cent_arr = load_gals(cent_fns,dim=9)
 
 # first three columns of file are positions, next are velocities, then halo index and finally halo mass
 sats_pos = sats_arr[:,0:3]
