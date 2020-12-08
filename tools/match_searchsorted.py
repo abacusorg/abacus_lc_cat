@@ -136,10 +136,11 @@ import numba
 @numba.njit()
 def match_halo_pids_to_lc_rvint(nsubsamp, hpid, rvint, lcpid):
     '''
-    Given that we have a list of halos that are definitely in the light cone,
-    match their subsample PIDs to light cone particle PIDs in a sorted "zipper".
-    Record the RVint of matched particles, and the halo ID, as we go.  Then,
-    at the end, partition the matches on
+    Given that we have a list of halos in the light cone, match their
+    subsample PIDs to light cone particle PIDs in a sorted "zipper".
+    Record the RVint of matched particles, and the halo ID, as we go.
+    Then, at the end, gather the RVints in halo order by sorting on
+    those halo IDs.  Return the RVints, along with the counts per halo.
     
     TODO: this may rearrange the list of subsample PIDs within a halo. Do we
     need to preserve the order, because we save the densest as the first,
@@ -214,7 +215,7 @@ def match_halo_pids_to_lc_rvint(nsubsamp, hpid, rvint, lcpid):
     # partition the results on the haloid
     iord = np.argsort(hrvint_hids)
     hrvint = hrvint[iord]
-    hrvint_hids = hrvint_hids[iord]
+    hrvint_hids = hrvint_hids[iord]  # maybe not needed, but probably makes counting faster
     
     # one more pass to count nmatch per halo
     # TODO: not super optimized, probably doesn't matter
