@@ -19,12 +19,14 @@ from pathlib import Path
 import asdf
 import numpy as np
 from scipy.interpolate import interp1d
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import argparse
 from astropy.table import Table
 
 from tools.InputFile import InputFile
-from tools.merger import simple_load, get_zs_from_headers, get_slab_halo, get_one_header, unpack_inds, pack_inds, reorder_by_slab
+from tools.merger import simple_load, get_zs_from_headers, get_halos_per_slab, get_one_header, unpack_inds, pack_inds, reorder_by_slab
 from tools.aid_asdf import save_asdf
 from tools.read_headers import get_lc_info
 from tools.compute_dist import dist
@@ -82,27 +84,18 @@ def correct_inds(halo_ids, N_halos_slabs, slabs, inds_fn):
 
     return ids
 
-def get_mt_info(fns, fields, minified, inds_fn):
+def get_mt_info(fn_load, fields, minified):
     '''
     Load merger tree and progenitors information
     '''
 
-    # selected files to load
-    fns_load = [fns[i] for i in inds_fn]
-
-    # if we are loading all progenitors and not just main
-    if "Progenitors" in fields:
-        merger_tree, Progs = simple_load(fns_load, fields=fields)
-    else:
-        merger_tree = simple_load(fns_load, fields=fields)
-
+    # loading merger tree info
+    mt_data = simple_load(fn_load, fields=fields)
+        
     # turn data into astropy table
-    Merger = Table(merger_tree, copy=False)
-    Merger.add_column('ComovingDistance', copy=False)
+    Merger = mt_data['merger']
+    Merger.add_column(np.empty(len(Merger['HaloIndex']), dtype=np.float32), copy=False, name='ComovingDistance')
     
-    # get number of halos in each slab and number of slabs
-    N_halos_slabs, slabs = get_slab_halo(fns, minified)
-
     # if loading all progenitors
     if "Progenitors" in fields:
         num_progs = merger_tree["NumProgenitors"]
@@ -111,9 +104,7 @@ def get_mt_info(fns, fields, minified, inds_fn):
         start_progs[1:] = num_progs.cumsum()[:-1]
         Merger.add_column(start_progs, name='StartProgenitors', copy=False)
         
-        return Merger, Progs, N_halos_slabs, slabs,
-
-    return Merger, N_halos_slabs, slabs
+    return mt_data
 
 def solve_crossing(r1, r2, pos1, pos2, chi1, chi2, Lbox, origin):
     '''
@@ -147,6 +138,7 @@ def solve_crossing(r1, r2, pos1, pos2, chi1, chi2, Lbox, origin):
     # interpolated velocity [km/s]
     vel_star = v_avg * CONSTANTS['c']  # vel1+a_avg*(chi1-chi_star)
 
+    # x is comoving position; r = x a; dr = a dx; r = a x; dr = da x + dx a; a/H
     #vel_star = dx/deta = dr/dt − H(t)r -> r is real space coord dr/dt = vel_star + a H(t) x 
     # 'Htime', 'HubbleNow', 'HubbleTimeGyr', 'HubbleTimeHGyr'
     
@@ -188,9 +180,6 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
     
     merger_dir = merger_parent / sim_name
     header = get_one_header(merger_dir)
-
-    print(header.keys())
-    quit()
     
     # simulation parameters
     Lbox = header['BoxSize']
@@ -312,72 +301,64 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
         # number of merger tree files
         print("number of files = ", len(fns_this), len(fns_prev))
         assert n_chunks == len(fns_this) and n_chunks == len(fns_prev), "Incomplete merger tree files"
-
         # reorder file names by super slab number
         fns_this = reorder_by_slab(fns_this,minified)
         fns_prev = reorder_by_slab(fns_prev,minified)
 
-        # for each chunk
-        for k in range(n_chunks):
+        # get number of halos in each slab and number of slabs
+        N_halos_slabs_this, slabs_this = get_halos_per_slab(fns_this, minified)
+        N_halos_slabs_prev, slabs_prev = get_halos_per_slab(fns_prev, minified)
+        
+        # maybe we want to support resuming from arbitrary superslab
+        first_ss = 0
 
+        # We're going to be loading slabs in a rolling fashion:
+        # reading the "high" slab at the leading edge, discarding the trailing "low" slab
+        # and moving the mid to low. But first we need to read all three to prime the queue
+        mt_prev = {}  # indexed by slab num
+        mt_prev[(first_ss-1)%n_chunks] = get_mt_info(fns_prev[(first_ss-1)%n_chunks], fields=fields_mt, minified=minified)
+        mt_prev[first_ss] = get_mt_info(fns_prev[first_ss], fields=fields_mt, minified=minified)
+
+        # for each chunk
+        for k in range(first_ss,n_chunks):
+            # starting and finishing superslab chunks
+            klow = (k-1)%n_chunks
+            khigh = (k+1)%n_chunks
+            
+            # Slide down by one
+            if (klow-1)%n_chunks in mt_prev:
+                del mt_prev[(klow-1)%n_chunks]
+            mt_prev[khigh] = get_mt_info(fns_prev[khigh], fields_mt, minified)
+            
             # starting and finishing superslab chunks; 
             inds_fn_this = [k]
-            inds_fn_prev = np.array([(k-1),k,(k+1)],dtype=int) % n_chunks
-
+            inds_fn_prev = np.array([klow,k,khigh],dtype=int)
+            
             print("chunks loaded in this and previous redshifts = ",inds_fn_this, inds_fn_prev)
             # get merger tree data for this snapshot and for the previous one
-            if "Progenitors" in fields_mt:
-                (
-                    Merger_this,
-                    Progs_this,
-                    N_halos_slabs_this,
-                    slabs_this,
-                ) = get_mt_info(
-                    fns_this,
-                    fields=fields_mt,
-                    minified=minified,
-                    inds_fn=inds_fn_this
-                )
-                (
-                    Merger_prev,
-                    Progs_prev,
-                    N_halos_slabs_prev,
-                    slabs_prev
-                ) = get_mt_info(
-                    fns_prev,
-                    fields=fields_mt,
-                    minified=minified,
-                    inds_fn=inds_fn_prev,
-                )
-            else:
-                (
-                    Merger_this,
-                    N_halos_slabs_this,
-                    slabs_this,
-                ) = get_mt_info(
-                    fns_this,
-                    fields=fields_mt,
-                    minified=minified,
-                    inds_fn=inds_fn_this,
-                )
-                (
-                    Merger_prev,
-                    N_halos_slabs_prev,
-                    slabs_prev,
-                ) = get_mt_info(
-                    fns_prev,
-                    fields=fields_mt,
-                    minified=minified,
-                    inds_fn=inds_fn_prev,
-                )
 
-
+            mt_data_this = get_mt_info(fns_this[k], fields_mt, minified)
+            #mt_data_prev, N_halos_slabs_prev, slabs_prev = get_mt_info(fns_prev,fields_mt,minified,inds_fn_prev)
+            
             # number of halos in this step and previous step; this depends on the number of files requested
             N_halos_this = np.sum(N_halos_slabs_this[inds_fn_this])
             N_halos_prev = np.sum(N_halos_slabs_prev[inds_fn_prev])
             print("N_halos_this = ", N_halos_this)
             print("N_halos_prev = ", N_halos_prev)
-            
+
+            Merger_this = mt_data_this['merger']
+            #Merger_prev = mt_data_prev['merger']
+            cols = {col:np.empty(N_halos_prev, dtype=(Merger_this[col].dtype, Merger_this[col].shape[1] if 'Position' in col else 1)) for col in Merger_this.keys()}
+            Merger_prev = Table(cols, copy=False)
+            offset = 0
+            for key in mt_prev.keys():
+                size_chunk = len(mt_prev[key]['merger']['HaloIndex'])
+                #for col in Merger_this.keys():
+                #Merger_prev[col][offset:offset+size_chunk] = mt_prev[key]['merger'][:]
+                Merger_prev[offset:offset+size_chunk] = mt_prev[key]['merger'][:]
+                offset += size_chunk
+            # TODO: NOT THE NICEST IN TERMS OF I/O
+                
             # mask where no merger tree info is available (because we don'to need to solve for eta star for those)
             noinfo_this = Merger_this['MainProgenitor'] <= 0
             info_this = Merger_this['MainProgenitor'] > 0
@@ -416,8 +397,8 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                 origin = origins[o]
                 
                 # comoving distance to observer
-                Merger_this['ComovingDistance'] = dist(Merger_this['Position'], origin)
-                Merger_prev['ComovingDistance'] = dist(Merger_prev['Position'], origin)
+                Merger_this['ComovingDistance'][:] = dist(Merger_this['Position'], origin)
+                Merger_prev['ComovingDistance'][:] = dist(Merger_prev['Position'], origin)
                 
                 # merger tree data of main progenitor halos corresponding to the halos in current snapshot
                 Merger_prev_main_this = Merger_prev[Merger_this['MainProgenitor']].copy()
@@ -489,7 +470,8 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
 
                     plt.legend()
                     plt.axis('equal')
-
+                    plt.savefig('this_%d_%d_%d.png'%(i,k,o))
+                    
                     x = Merger_prev_main_this_info_lc['Position'][:,0]
                     
                     choice = (x > x_min) & (x < x_max)
@@ -502,8 +484,10 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
 
                     plt.legend()
                     plt.axis('equal')
-                    plt.show()
-
+                    plt.savefig('prev_%d_%d_%d.png'%(i,k,o))
+                    #plt.show()
+                    plt.close()
+                    
                 # select halos without mt info that have had a light cone crossing
                 Merger_this_noinfo_lc = Merger_this_noinfo[mask_lc_this_noinfo]
 
@@ -617,7 +601,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                         # select all progenitors
                         start = starts[j]
                         num = nums[j]
-                        prog_inds = Progs_this[start : start + num]
+                        prog_inds = mt_data_this['progenitor'][start : start + num]
 
                         # remove progenitors with no info
                         prog_inds = progs_inds[prog_inds > 0]
@@ -679,8 +663,10 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                     plt.xlabel([-1000, 3000])
                     plt.ylabel([-1000, 3000])
                     plt.axis("equal")
-                    plt.show()
-
+                    plt.savefig('interp_%d_%d_%d.png'%(i,k,o))
+                    #plt.show()
+                    plt.close()
+                    
                 gc.collect()
 
                 # pack halo indices for the halos in Merger_next
