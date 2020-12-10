@@ -20,13 +20,15 @@ from tools.match_searchsorted import match
 
 # these are probably just for testing; should be removed for production
 DEFAULTS = {}
-DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
-DEFAULTS['light_cone_parent'] = Path("/mnt/gosling2/bigsims/")
-#DEFAULTS['light_cone_parent'] = Path("/global/project/projectdirs/desi/cosmosim/Abacus")
-DEFAULTS['catalog_parent'] = Path("/mnt/gosling1/boryanah/light_cone_catalog/")
-#DEFAULTS['catalog_parent'] = Path("/global/cscratch1/sd/boryanah/light_cone_catalog/")
-DEFAULTS['merger_parent'] = Path("/mnt/gosling2/bigsims/merger/")
-#DEFAULTS['merger_parent'] = Path("/global/project/projectdirs/desi/cosmosim/Abacus/merger")
+DEFAULTS['sim_name'] = "AbacusSummit_highbase_c021_ph000"
+#DEFAULTS['sim_name'] = "AbacusSummit_highbase_c000_ph100"
+#DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
+#DEFAULTS['light_cone_parent'] = Path("/mnt/gosling2/bigsims/")
+DEFAULTS['light_cone_parent'] = Path("/global/project/projectdirs/desi/cosmosim/Abacus")
+#DEFAULTS['catalog_parent'] = Path("/mnt/gosling1/boryanah/light_cone_catalog/")
+DEFAULTS['catalog_parent'] = Path("/global/cscratch1/sd/boryanah/light_cone_catalog/")
+#DEFAULTS['merger_parent'] = Path("/mnt/gosling2/bigsims/merger/")
+DEFAULTS['merger_parent'] = Path("/global/project/projectdirs/desi/cosmosim/Abacus/merger")
 DEFAULTS['z_lowest'] = 0.5
 DEFAULTS['z_highest'] = 0.8
 
@@ -70,7 +72,9 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
         snaps_mt = sorted(merger_dir.glob("associations_z*.0.asdf"))
         zs_mt = get_zs_from_headers(snaps_mt)
         np.save("data/zs_mt.npy", zs_mt)
-    zs_mt = np.load("data/zs_mt.npy")[:-1]
+    # TESTING remove
+    #zs_mt = np.load("data/zs_mt.npy")[:-1] # og
+    zs_mt = np.load("data/zs_mt.npy")[4:-4]
 
     # directory where we have saved the final outputs from merger trees and halo catalogs
     cat_lc_dir = catalog_parent / sim_name / "halos_light_cones"

@@ -31,16 +31,18 @@ from tools.merger import simple_load, get_halos_per_slab, get_zs_from_headers, g
 
 # these are probably just for testing; should be removed for production
 DEFAULTS = {}
-DEFAULTS['sim_name'] = "AbacusSummit_highbase_c000_ph100"  # AbacusSummit_base_c000_ph006
-DEFAULTS['compaso_parent'] = Path("/mnt/gosling2/bigsims")
-#DEFAULTS['compaso_parent'] = Path("/global/project/projectdirs/desi/cosmosim/Abacus")
-DEFAULTS['catalog_parent'] = Path("/mnt/gosling1/boryanah/light_cone_catalog/")
-#DEFAULTS['catalog_parent'] = Path("/global/cscratch1/sd/boryanah/light_cone_catalog/")
-DEFAULTS['merger_parent'] = Path("/mnt/gosling2/bigsims/merger")
-#DEFAULTS['merger_parent'] = Path("/global/project/projectdirs/desi/cosmosim/Abacus/merger")
+DEFAULTS['sim_name'] = "AbacusSummit_highbase_c021_ph000"
+#DEFAULTS['sim_name'] = "AbacusSummit_highbase_c000_ph100"
+#DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
+#DEFAULTS['compaso_parent'] = Path("/mnt/gosling2/bigsims")
+DEFAULTS['compaso_parent'] = Path("/global/project/projectdirs/desi/cosmosim/Abacus")
+#DEFAULTS['catalog_parent'] = Path("/mnt/gosling1/boryanah/light_cone_catalog/")
+DEFAULTS['catalog_parent'] = Path("/global/cscratch1/sd/boryanah/light_cone_catalog/")
+#DEFAULTS['merger_parent'] = Path("/mnt/gosling2/bigsims/merger")
+DEFAULTS['merger_parent'] = Path("/global/project/projectdirs/desi/cosmosim/Abacus/merger")
 DEFAULTS['z_start'] = 0.5
 DEFAULTS['z_stop'] = 0.8
-CONSTANTS = {'c': 299792.458}  # km/s, speed of light # TODO: I THINK MISSING a IN VEL
+CONSTANTS = {'c': 299792.458}  # km/s, speed of light
 
 def extract_redshift(fn):
     fn = str(fn)
@@ -204,10 +206,17 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
 
         # load halo catalog, setting unpack to False for speed
         if save_pos:
-            cat = CompaSOHaloCatalog(catdir, load_subsamples='A_halo_all', fields=fields_cat, unpack_bits = False)
+            try:
+                cat = CompaSOHaloCatalog(catdir, load_subsamples='A_halo_all', fields=fields_cat, unpack_bits = False)
+                loaded_pos = True
+            except:
+                cat = CompaSOHaloCatalog(catdir, load_subsamples='A_halo_pid', fields=fields_cat, unpack_bits = False)
+                print("Particle positions are not available for this redshift. Saving only PIDs")
+                loaded_pos = False
         else:
             cat = CompaSOHaloCatalog(catdir, load_subsamples='A_halo_pid', fields=fields_cat, unpack_bits = False)
-        
+            loaded_pos = False
+            
         # halo catalog
         halo_table = cat.halos[halo_ind_lc]
         header = cat.header
@@ -216,14 +225,14 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
         
         # load the particle ids
         pid = cat.subsamples['pid']
-        if save_pos:
+        if save_pos and loaded_pos:
             pos = cat.subsamples['pos']
         del cat
 
         # reindex npstart and npout for the new catalogs
         npstart = halo_table['npstartA']
         npout = halo_table['npoutA']
-        if save_pos:
+        if save_pos and loaded_pos:
             pid_new, pos_new, npstart_new, npout_new = reindex_pid_pos(pid, pos, npstart, npout)
             del pid, pos
         else:
@@ -235,12 +244,13 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
         del npstart_new, npout_new
         
         # create particle array
-        if save_pos:
+        if save_pos and loaded_pos:
             pid_table = Table({'pid': np.zeros(len(pid_new), pid_new.dtype), 'pos': np.zeros(pos_new.shape, pos_new.dtype)})
             pid_table['pos'] = pos_new
         else:
             pid_table = Table({'pid': np.zeros(len(pid_new), pid_new.dtype)})
         pid_table['pid'] = pid_new
+        print("pid new ",len(np.unique(pid_new))*100./len(pid_new))
         del pid_new
 
         # isolate halos that did not have interpolation and get the velocity from the halo info files
@@ -254,14 +264,13 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
         halo_table['pos_interp'] = pos_interp_lc
         halo_table['vel_interp'] = vel_interp_lc
         halo_table['redshift_interp'] = z_of_chi(chi_interp_lc)
+        print("halo id new ",len(np.unique(halo_ind_lc))*100./len(halo_ind_lc))
+        
         del halo_ind_lc, pos_interp_lc, vel_interp_lc, not_interp, chi_interp_lc
         
         # save to files
         save_asdf(halo_table, "halo_info_lc", header, cat_lc_dir / ("z%4.3f"%z_mt))
-        if save_pos:
-            save_asdf(pid_table, "pid_rv_lc", header, cat_lc_dir / ("z%4.3f"%z_mt))
-        else:
-            save_asdf(pid_table, "pid_lc", header, cat_lc_dir / ("z%4.3f"%z_mt))
+        save_asdf(pid_table, "pid_lc", header, cat_lc_dir / ("z%4.3f"%z_mt))
         
         # delete things at the end
         del pid_table

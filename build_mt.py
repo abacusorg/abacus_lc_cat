@@ -33,11 +33,13 @@ from tools.compute_dist import dist
 
 # these are probably just for testing; should be removed for production
 DEFAULTS = {}
-DEFAULTS['sim_name'] = "AbacusSummit_highbase_c000_ph100"  # AbacusSummit_base_c000_ph006
-DEFAULTS['merger_parent'] = Path("/mnt/gosling2/bigsims/merger")
-#DEFAULTS['merger_parent'] = Path("/global/project/projectdirs/desi/cosmosim/Abacus/merger")
-DEFAULTS['catalog_parent'] = Path("/mnt/gosling1/boryanah/light_cone_catalog/")
-#DEFAULTS['catalog_parent'] = Path("/global/cscratch1/sd/boryanah/light_cone_catalog/")
+DEFAULTS['sim_name'] = "AbacusSummit_highbase_c021_ph000"
+#DEFAULTS['sim_name'] = "AbacusSummit_highbase_c000_ph100"
+#DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
+#DEFAULTS['merger_parent'] = Path("/mnt/gosling2/bigsims/merger")
+DEFAULTS['merger_parent'] = Path("/global/project/projectdirs/desi/cosmosim/Abacus/merger")
+#DEFAULTS['catalog_parent'] = Path("/mnt/gosling1/boryanah/light_cone_catalog/")
+DEFAULTS['catalog_parent'] = Path("/global/cscratch1/sd/boryanah/light_cone_catalog/")
 DEFAULTS['z_start'] = 0.5
 DEFAULTS['z_stop'] = 0.8
 CONSTANTS = {'c': 299792.458}  # km/s, speed of light
@@ -95,12 +97,12 @@ def get_mt_info(fn_load, fields, minified):
     # turn data into astropy table
     Merger = mt_data['merger']
     Merger.add_column(np.empty(len(Merger['HaloIndex']), dtype=np.float32), copy=False, name='ComovingDistance')
-    
+
     # if loading all progenitors
     if "Progenitors" in fields:
-        num_progs = merger_tree["NumProgenitors"]
+        num_progs = Merger["NumProgenitors"]
         # get an array with the starting indices of the progenitors array
-        start_progs = np.zeros(merger_tree.shape, dtype=int)
+        start_progs = np.zeros(len(num_progs), dtype=int)
         start_progs[1:] = num_progs.cumsum()[:-1]
         Merger.add_column(start_progs, name='StartProgenitors', copy=False)
         
@@ -186,9 +188,11 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
     # location of the LC origins in Mpc/h
     origins = np.array(header['LightConeOrigins']).reshape(-1,3)
 
+    '''
     # just for testing with highbase. remove!
     if 'highbase' in sim_name:
         origins /= 2.
+    '''
     
     # directory where we save the final outputs
     cat_lc_dir = catalog_parent / sim_name / "halos_light_cones/"
@@ -250,9 +254,9 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
         resume_flags = np.zeros((n_chunks, origins.shape[0]), dtype=bool)
 
     # fields to extract from the merger trees
-    # fields_mt = ['HaloIndex','HaloMass','Position','MainProgenitor','Progenitors','NumProgenitors']
+    fields_mt = ['HaloIndex','HaloMass','Position','MainProgenitor','Progenitors','NumProgenitors']
     # lighter version
-    fields_mt = ['HaloIndex', 'Position', 'MainProgenitor']
+    #fields_mt = ['HaloIndex', 'Position', 'MainProgenitor']
 
     # redshift of closest point on wall between original and copied box
     z1 = z_of_chi(0.5 * Lbox - origins[0][0])
@@ -310,7 +314,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
         N_halos_slabs_prev, slabs_prev = get_halos_per_slab(fns_prev, minified)
         
         # maybe we want to support resuming from arbitrary superslab
-        first_ss = 0
+        first_ss = 0 
 
         # We're going to be loading slabs in a rolling fashion:
         # reading the "high" slab at the leading edge, discarding the trailing "low" slab
@@ -357,7 +361,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                 #Merger_prev[col][offset:offset+size_chunk] = mt_prev[key]['merger'][:]
                 Merger_prev[offset:offset+size_chunk] = mt_prev[key]['merger'][:]
                 offset += size_chunk
-            # TODO: NOT THE NICEST IN TERMS OF I/O
+            # TODO: maybe improve to reduce I/O
                 
             # mask where no merger tree info is available (because we don'to need to solve for eta star for those)
             noinfo_this = Merger_this['MainProgenitor'] <= 0
@@ -392,7 +396,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
             
             # loop over all origins
             for o in range(len(origins)):
-
+                
                 # location of the observer
                 origin = origins[o]
                 
@@ -513,6 +517,9 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                     origin
                 )
 
+                # TESTING
+                #bool_star_this_info_lc = np.ones(len(bool_star_this_info_lc),dtype=bool)
+
                 # number of objects in this light cone
                 N_this_star_lc = np.sum(bool_star_this_info_lc)
                 N_this_noinfo_lc = np.sum(mask_lc_this_noinfo)
@@ -595,16 +602,18 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                     nums = Merger_this_info_lc['NumProgenitors'][bool_star_this_info_lc]
                     starts = Merger_this_info_lc['StartProgenitors'][bool_star_this_info_lc]
                     # for testing purposes (remove in final version)
-                    main_progs = Merger_this_info_lc['HaloIndex'][bool_star_this_info_lc]
+                    main_progs = Merger_this_info_lc['MainProgenitor'][bool_star_this_info_lc]
+                    progs = mt_data_this['progenitors']['Progenitors']
                     # loop around halos that were marked belonging to this redshift catalog
                     for j in range(N_this_star_lc):
                         # select all progenitors
                         start = starts[j]
                         num = nums[j]
-                        prog_inds = mt_data_this['progenitor'][start : start + num]
-
+                        prog_inds = progs[start : start + num]
+                        #if np.sum(prog_inds == 0) > 0: print("ZEROS = ",prog_inds)
+                        
                         # remove progenitors with no info
-                        prog_inds = progs_inds[prog_inds > 0]
+                        prog_inds = prog_inds[prog_inds > 0]
                         if len(prog_inds) == 0: continue
 
                         # correct halo indices
@@ -612,8 +621,8 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                         halo_inds = Merger_prev['HaloIndex'][prog_inds]
 
                         # test output; remove in final version
-                        if j < 100: print(halo_inds, Merger_prev[main_progs[j]])
-
+                        #if num > 1: print(halo_inds, Merger_prev['HaloIndex'][main_progs[j]])
+                        
                         # mark ineligible
                         eligibility_prev[halo_inds] = False
 

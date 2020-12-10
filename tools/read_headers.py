@@ -17,7 +17,7 @@ $ rm headers.zip
 def get_lc_info(header_dir):
     # sort headers by step number
     header_fns = sorted(list(header_dir.glob("header_Step*")))
-
+    
     # initialize arrays
     redshifts = np.zeros(len(header_fns))
     steps = np.zeros(len(header_fns),dtype=int)
@@ -38,13 +38,15 @@ def get_lc_info(header_dir):
 
 def main():
     # location where all headers for sim are saved
-    header_dir = Path("all_headers")
+    sim_name = "AbacusSummit_highbase_c021_ph000"
+    header_dir = Path("/global/homes/b/boryanah/repos/abacus_lc_cat/all_headers") / sim_name
     redshifts, steps, coord_dist = get_lc_info(header_dir)
 
     print(redshifts)
     print(steps)
     print(coord_dist)
     
-    #np.save("../data_headers/redshifts.npy",redshifts)
-    #np.save("../data_headers/steps.npy",steps)
-    #np.save("../data_headers/coord_dist.npy",coord_dist)
+    np.save("../data_headers/redshifts.npy",redshifts)
+    np.save("../data_headers/steps.npy",steps)
+    np.save("../data_headers/coord_dist.npy",coord_dist)
+

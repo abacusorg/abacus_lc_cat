@@ -25,7 +25,7 @@ if 'highbase' not in sim_name:
     x_min = -1000
     x_max = x_min+10.
 else:
-    x_min = -500
+    x_min = 0#-500
     x_max = x_min+10.
 
 # choice of redshift
@@ -55,8 +55,9 @@ z = 0.728
 z = 0.8
 
 #file_type = 'halo_info'
-file_type = 'pid_rv'
+#file_type = 'pid_rv'
 #file_type = 'table_lc'
+file_type = 'unmatched'
 
 if file_type == 'halo_info':
     fn = cat_lc_dir+"z%.3f/halo_info_lc.asdf"%(z)
@@ -85,6 +86,10 @@ if file_type == 'table_lc':
     z_interp = z_of_chi(chi)[not_interp]
     #pos = pos[~not_interp]
 
+if file_type == 'unmatched':
+    ind = 8
+    pos = np.load("pos_%d.npy"%(ind))
+    
 print(pos.shape)
 
 
@@ -105,8 +110,9 @@ print_minimax(z)
 
 choice = (x > x_min) & (x < x_max)
 
-plt.scatter(y[choice],z[choice],s=0.1,alpha=1.)
+#plt.scatter(y[choice],z[choice],s=0.1,alpha=1.)
 #plt.scatter(y,z,s=0.01,alpha=1.)
+plt.scatter(x,z,s=0.01,alpha=1.)
 plt.axis('equal')
 plt.savefig('test.png')
 plt.show()

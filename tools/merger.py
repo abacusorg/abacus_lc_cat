@@ -4,8 +4,6 @@ import scipy.stats as scist
 import matplotlib.pyplot as plt
 from astropy.table import Table
 
-# todo: can speed up by using info about how many halos instead concatenating
-
 def extract_superslab(fn):
     # looks like "associations_z0.100.0.asdf"
     return int(fn.split('.')[-2])
@@ -137,7 +135,8 @@ def simple_load(filenames, fields):
     if do_prog:
         ret['progenitors'] = p
         assert jp == N_prog_tot
-    
+        fields.append('Progenitors')
+        
     return ret
 
 def simple_load_old(filenames, fields):
@@ -203,8 +202,7 @@ def simple_load_old(filenames, fields):
         del fdata
         f.close()
 
-    #cols = {col:np.empty(N_halos, dtype=user_dt[col]) for col in fields}
-    # TESTING
+    #cols = {col:np.empty(N_halos, dtype=user_dt[col]) for col in fields
     final = Table(final, copy=False)
     if "Progenitors" in fields:
         return final, final_progs
