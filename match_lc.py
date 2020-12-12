@@ -12,11 +12,11 @@ import gc
 import os
 import argparse
 
-from tools.aid_asdf import save_asdf, load_mt_pid, load_lc_pid_rv
+from tools.aid_asdf import save_asdf, load_mt_pid, load_mt_npout, load_lc_pid_rv
 from bitpacked import unpack_rvint, unpack_pids
 from tools.merger import get_zs_from_headers, get_one_header
 from tools.read_headers import get_lc_info
-from tools.match_searchsorted import match
+from tools.match_searchsorted import match, match_halo_pids_to_lc_rvint
 
 # these are probably just for testing; should be removed for production
 DEFAULTS = {}
@@ -43,12 +43,15 @@ def get_mt_fns(z_th, zs_mt, chis_mt, cat_lc_dir):
     chi_high = chis_mt[k+1]
     fn_low = cat_lc_dir / ("z%.3f/pid_lc.asdf"%(z_low))
     fn_high = cat_lc_dir / ("z%.3f/pid_lc.asdf"%(z_high))
+    halo_fn_low = cat_lc_dir / ("z%.3f/halo_info_lc.asdf"%(z_low))# TESTING
+    halo_fn_high = cat_lc_dir / ("z%.3f/halo_info_lc.asdf"%(z_high))# TESTING
 
     mt_fns = [fn_high, fn_low]
     mt_zs = [z_high, z_low]
     mt_chis = [chi_high, chi_low]
+    halo_mt_fns = [halo_fn_high, halo_fn_low]
 
-    return mt_fns, mt_zs, mt_chis
+    return mt_fns, mt_zs, mt_chis, halo_mt_fns
 
 def extract_steps(fn):
     split_fn = fn.split('Step')[1]
@@ -123,6 +126,7 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
     # initialize previously loaded mt file name
     currently_loaded_zs = []
     currently_loaded_headers = []
+    currently_loaded_npouts = []
     currently_loaded_pids = []
     currently_loaded_tables = []
     for step in range(step_start,step_stop+1):
@@ -136,7 +140,7 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
         print("light cones step, redshift = ",step_this, z_this)
 
         # get the two redshifts it's straddling and the mean chi
-        mt_fns, mt_zs, mt_chis = get_mt_fns(z_this, zs_mt, chis_mt, cat_lc_dir)
+        mt_fns, mt_zs, mt_chis, halo_mt_fns = get_mt_fns(z_this, zs_mt, chis_mt, cat_lc_dir)
 
         # get the mean chi
         mt_chi_mean = np.mean(mt_chis)
@@ -147,9 +151,13 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
         # is this the redshift that's closest to the bridge between two redshifts 
         mid_bool = (np.argmin(np.abs(mt_chi_mean-chis_all)) <= j+buffer_no) & (np.argmin(np.abs(mt_chi_mean-chis_all)) >= j-buffer_no)
 
+        # TESTING
+        #mid_bool = True
+        
         # if not in between two redshifts, we just need one catalog -- the one it is closest to
         if not mid_bool:
-            mt_fns = [mt_fns[np.argmin(np.abs(mt_chis-chi_this))]] 
+            mt_fns = [mt_fns[np.argmin(np.abs(mt_chis-chi_this))]]
+            halo_mt_fns = [halo_mt_fns[np.argmin(np.abs(mt_chis-chi_this))]] 
             mt_zs = [mt_zs[np.argmin(np.abs(mt_chis-chi_this))]] 
 
         # load this and prev
@@ -172,6 +180,7 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
 
             # load new merger tree catalog
             mt_pid, header = load_mt_pid(mt_fns[i],Lbox,PPD)
+            halo_mt_npout = load_mt_npout(halo_mt_fns[i])
             
             # start the light cones table for this redshift
             lc_table_final = np.empty(len(mt_pid),dtype=[('pid',mt_pid.dtype),('pos',(np.float32,3)),\
@@ -181,6 +190,7 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
             currently_loaded_zs.append(mt_zs[i])
             currently_loaded_headers.append(header)
             currently_loaded_pids.append(mt_pid)
+            currently_loaded_npouts.append(halo_mt_npout)
             currently_loaded_tables.append(lc_table_final)
 
         print("currently loaded redshifts = ",currently_loaded_zs)    
@@ -209,23 +219,38 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
             for i in range(len(mt_fns)):
                 which_mt = np.where(mt_zs[i] == currently_loaded_zs)[0]
                 mt_pid = currently_loaded_pids[which_mt[0]]
+                halo_mt_npout = currently_loaded_npouts[which_mt[0]]
                 header = currently_loaded_headers[which_mt[0]]
                 lc_table_final = currently_loaded_tables[which_mt[0]]
                 mt_z = currently_loaded_zs[which_mt[0]]
 
+                
                 # match merger tree and light cone pids
+                print("starting")
+                t1 = time.time()
                 i_sort_lc_pid = np.argsort(lc_pid)
                 mt_in_lc = match(mt_pid, lc_pid, arr2_index=i_sort_lc_pid)
                 comm2 = mt_in_lc[mt_in_lc > -1]
                 comm1 = np.arange(len(mt_pid),dtype=int)[mt_in_lc > -1]
                 pid_mt_lc = mt_pid[mt_in_lc > -1]
-
+                print("time = ", time.time()-t1)
+                
                 # select the intersected positions
                 pos_mt_lc, vel_mt_lc = unpack_rvint(lc_rv[comm2],Lbox)
                 
                 # print percentage of matched pids
                 print("at z = %.3f, matched = "%mt_z,len(comm1)*100./(len(mt_pid)))
-
+                
+                '''
+                # alternative Lehman implementation
+                t1 = time.time()
+                nmatch, hrvint = match_halo_pids_to_lc_rvint(halo_mt_npout, mt_pid, lc_rv, lc_pid)
+                print("at z = %.3f, matched = "%mt_z,len(hrvint)*100./(len(mt_pid)))
+                print("time = ", time.time()-t1)
+                pos_mt_lc, vel_mt_lc = unpack_rvint(hrvint,Lbox)
+                '''
+                quit()
+                
                 # offset depending on which light cone we are at
                 pos_mt_lc += offset_lc
 

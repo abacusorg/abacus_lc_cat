@@ -254,9 +254,9 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
         resume_flags = np.zeros((n_chunks, origins.shape[0]), dtype=bool)
 
     # fields to extract from the merger trees
-    fields_mt = ['HaloIndex','HaloMass','Position','MainProgenitor','Progenitors','NumProgenitors']
+    #fields_mt = ['HaloIndex','HaloMass','Position','MainProgenitor','Progenitors','NumProgenitors']
     # lighter version
-    #fields_mt = ['HaloIndex', 'Position', 'MainProgenitor']
+    fields_mt = ['HaloIndex', 'Position', 'MainProgenitor']
 
     # redshift of closest point on wall between original and copied box
     z1 = z_of_chi(0.5 * Lbox - origins[0][0])
@@ -702,6 +702,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                     offset += N_halos_slabs_prev[idx]
 
                 # write as table the information about halos that are part of next loaded redshift
+                # TESTING don't save to test
                 save_asdf(Merger_next, ("Merger_next_z%4.3f_lc%d.%02d"%(z_prev, o, k)), header, cat_lc_dir / "tmp")
 
                 # save redshift of catalog that is next to load and difference in comoving between this and prev
