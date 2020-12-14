@@ -86,6 +86,31 @@ def correct_inds(halo_ids, N_halos_slabs, slabs, inds_fn):
 
     return ids
 
+def mark_ineligible(nums, starts, main_progs, progs, halo_ind_prev, eligibility_prev, N_halos_slabs_prev, slabs_prev, inds_fn_prev):
+    N_this_star_lc = len(nums)
+    # loop around halos that were marked belonging to this redshift catalog
+    for j in range(N_this_star_lc):
+        # select all progenitors
+        start = starts[j]
+        num = nums[j]
+        prog_inds = progs[start : start + num]
+
+        # remove progenitors with no info
+        prog_inds = prog_inds[prog_inds > 0]
+        if len(prog_inds) == 0: continue
+
+        # correct halo indices
+        prog_inds = correct_inds(prog_inds, N_halos_slabs_prev, slabs_prev, inds_fn_prev)
+        halo_inds = halo_ind_prev[prog_inds]
+
+        # test output; remove in final version
+        #if num > 1: print(halo_inds, Merger_prev['HaloIndex'][main_progs[j]])
+
+        # mark ineligible
+        eligibility_prev[halo_inds] = False
+    return eligibility_prev
+
+
 def get_mt_info(fn_load, fields, minified):
     '''
     Load merger tree and progenitors information
@@ -254,9 +279,9 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
         resume_flags = np.zeros((n_chunks, origins.shape[0]), dtype=bool)
 
     # fields to extract from the merger trees
-    #fields_mt = ['HaloIndex','HaloMass','Position','MainProgenitor','Progenitors','NumProgenitors']
+    fields_mt = ['HaloIndex','HaloMass','Position','MainProgenitor','Progenitors','NumProgenitors']
     # lighter version
-    fields_mt = ['HaloIndex', 'Position', 'MainProgenitor']
+    #fields_mt = ['HaloIndex', 'Position', 'MainProgenitor']
 
     # redshift of closest point on wall between original and copied box
     z1 = z_of_chi(0.5 * Lbox - origins[0][0])
@@ -604,28 +629,9 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                     # for testing purposes (remove in final version)
                     main_progs = Merger_this_info_lc['MainProgenitor'][bool_star_this_info_lc]
                     progs = mt_data_this['progenitors']['Progenitors']
-                    # loop around halos that were marked belonging to this redshift catalog
-                    for j in range(N_this_star_lc):
-                        # select all progenitors
-                        start = starts[j]
-                        num = nums[j]
-                        prog_inds = progs[start : start + num]
-                        #if np.sum(prog_inds == 0) > 0: print("ZEROS = ",prog_inds)
-                        
-                        # remove progenitors with no info
-                        prog_inds = prog_inds[prog_inds > 0]
-                        if len(prog_inds) == 0: continue
-
-                        # correct halo indices
-                        prog_inds = correct_inds(prog_inds, N_halos_slabs_prev, slabs_prev, inds_fn_prev)
-                        halo_inds = Merger_prev['HaloIndex'][prog_inds]
-
-                        # test output; remove in final version
-                        #if num > 1: print(halo_inds, Merger_prev['HaloIndex'][main_progs[j]])
-                        
-                        # mark ineligible
-                        eligibility_prev[halo_inds] = False
-
+                    halo_ind_prev = Merger_prev['HaloIndex']
+                    mark_ineligible(nums, starts, main_progs, progs, halo_ind_prev, eligibility_prev, N_halos_slabs_prev, slabs_prev, inds_fn_prev)
+                                    
                 # information to keep for next redshift considered
                 N_next = np.sum(~bool_star_this_info_lc)
                 Merger_next = Table(
