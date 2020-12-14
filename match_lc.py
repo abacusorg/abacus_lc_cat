@@ -43,8 +43,8 @@ def get_mt_fns(z_th, zs_mt, chis_mt, cat_lc_dir):
     chi_high = chis_mt[k+1]
     fn_low = cat_lc_dir / ("z%.3f/pid_lc.asdf"%(z_low))
     fn_high = cat_lc_dir / ("z%.3f/pid_lc.asdf"%(z_high))
-    halo_fn_low = cat_lc_dir / ("z%.3f/halo_info_lc.asdf"%(z_low))# TESTING
-    halo_fn_high = cat_lc_dir / ("z%.3f/halo_info_lc.asdf"%(z_high))# TESTING
+    halo_fn_low = cat_lc_dir / ("z%.3f/halo_info_lc.asdf"%(z_low))
+    halo_fn_high = cat_lc_dir / ("z%.3f/halo_info_lc.asdf"%(z_high))
 
     mt_fns = [fn_high, fn_low]
     mt_zs = [z_high, z_low]
@@ -68,7 +68,7 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
     # simulation parameters
     Lbox = header['BoxSize']
     PPD = header['ppd']
-    
+
     # more accurate, slightly slower
     if not os.path.exists("data/zs_mt.npy"):
         # all merger tree snapshots and corresponding redshifts
@@ -150,9 +150,6 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
 
         # is this the redshift that's closest to the bridge between two redshifts 
         mid_bool = (np.argmin(np.abs(mt_chi_mean-chis_all)) <= j+buffer_no) & (np.argmin(np.abs(mt_chi_mean-chis_all)) >= j-buffer_no)
-
-        # TESTING
-        #mid_bool = True
         
         # if not in between two redshifts, we just need one catalog -- the one it is closest to
         if not mid_bool:
@@ -227,6 +224,7 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
                 
                 # match merger tree and light cone pids
                 print("starting")
+                
                 t1 = time.time()
                 i_sort_lc_pid = np.argsort(lc_pid)
                 mt_in_lc = match(mt_pid, lc_pid, arr2_index=i_sort_lc_pid)
@@ -242,15 +240,17 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
                 print("at z = %.3f, matched = "%mt_z,len(comm1)*100./(len(mt_pid)))
                 
                 '''
-                # alternative Lehman implementation
+                # alternative Lehman implementation start
                 t1 = time.time()
-                nmatch, hrvint = match_halo_pids_to_lc_rvint(halo_mt_npout, mt_pid, lc_rv, lc_pid)
+                comm1, nmatch, hrvint = match_halo_pids_to_lc_rvint(halo_mt_npout, mt_pid, lc_rv, lc_pid)
                 print("at z = %.3f, matched = "%mt_z,len(hrvint)*100./(len(mt_pid)))
                 print("time = ", time.time()-t1)
-                pos_mt_lc, vel_mt_lc = unpack_rvint(hrvint,Lbox)
-                '''
-                quit()
                 
+                pos_mt_lc, vel_mt_lc = unpack_rvint(hrvint,Lbox)
+                pid_mt_lc = mt_pid[comm1]                
+                # alternative Lehman implementation end
+                '''
+
                 # offset depending on which light cone we are at
                 pos_mt_lc += offset_lc
 
@@ -259,7 +259,6 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
                 lc_table_final['pos'][comm1] = pos_mt_lc
                 lc_table_final['vel'][comm1] = vel_mt_lc
                 lc_table_final['redshift'][comm1] = np.ones(len(pid_mt_lc))*z_this
-
             print("-------------------")
 
 

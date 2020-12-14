@@ -176,11 +176,13 @@ def match_halo_pids_to_lc_rvint(nsubsamp, hpid, rvint, lcpid):
     assert nsubsamp.sum() == N
     
     haloids = np.repeat(np.arange(H), nsubsamp)
+    pinds = np.arange(N) # B.H.
     
     # put halo particles in pid order
     hord = np.argsort(hpid)
     hpid = hpid[hord]
     haloids = haloids[hord]
+    pinds = pinds[hord] # B.H.
     
     # put lc particles in pid order too
     M = len(lcpid)
@@ -193,6 +195,7 @@ def match_halo_pids_to_lc_rvint(nsubsamp, hpid, rvint, lcpid):
     # but will truncate the length to the used amount
     hrvint = np.empty((N,3), dtype=rvint.dtype)
     hrvint_hids = np.empty(N, dtype=haloids.dtype)
+    hinds = np.empty(N, dtype=pinds.dtype) # B.H.
     
     j = 0
     nfound = 0  # running total of matches
@@ -204,6 +207,8 @@ def match_halo_pids_to_lc_rvint(nsubsamp, hpid, rvint, lcpid):
             # match!
             hrvint[nfound] = rvint[j]
             hrvint_hids[nfound] = haloids[i]
+            this_idx = pinds[i] # B.H.
+            hinds[nfound] = this_idx  # B.H.
             nfound += 1
             j += 1
     
@@ -211,11 +216,13 @@ def match_halo_pids_to_lc_rvint(nsubsamp, hpid, rvint, lcpid):
     assert nfound <= N
     hrvint = hrvint[:nfound]
     hrvint_hids = hrvint_hids[:nfound]
+    hinds = hinds[:nfound] # B.H.
     
     # partition the results on the haloid
     iord = np.argsort(hrvint_hids)
     hrvint = hrvint[iord]
     hrvint_hids = hrvint_hids[iord]  # maybe not needed, but probably makes counting faster
+    hinds = hinds[iord] # B.H.
     
     # one more pass to count nmatch per halo
     # TODO: not super optimized, probably doesn't matter
@@ -225,4 +232,5 @@ def match_halo_pids_to_lc_rvint(nsubsamp, hpid, rvint, lcpid):
         
     assert nmatch.sum() == len(hrvint)
     
-    return nmatch, hrvint
+    #return nmatch, hrvint # B.H.
+    return hinds, nmatch, hrvint
