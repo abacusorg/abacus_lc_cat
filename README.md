@@ -19,7 +19,7 @@ in save: use the clean CompaSO catalogs; save all fields in the catalogs; interp
 
 in match: compare the new particle positions with what was in interp_lc for those halos; TEST PERCENTAGE OF MATCHES
 
-in hod: save the interpolated redshift for the centrals in build and print it out in the final mock
+in hod: save the interpolated redshift for the centrals in build and print it out in the final mock; broadcast and make into tables
 
 # Final checks
 
