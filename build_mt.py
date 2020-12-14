@@ -36,10 +36,10 @@ DEFAULTS = {}
 DEFAULTS['sim_name'] = "AbacusSummit_highbase_c021_ph000"
 #DEFAULTS['sim_name'] = "AbacusSummit_highbase_c000_ph100"
 #DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
-#DEFAULTS['merger_parent'] = Path("/mnt/gosling2/bigsims/merger")
-DEFAULTS['merger_parent'] = Path("/global/project/projectdirs/desi/cosmosim/Abacus/merger")
-#DEFAULTS['catalog_parent'] = Path("/mnt/gosling1/boryanah/light_cone_catalog/")
-DEFAULTS['catalog_parent'] = Path("/global/cscratch1/sd/boryanah/light_cone_catalog/")
+#DEFAULTS['merger_parent'] = "/mnt/gosling2/bigsims/merger"
+DEFAULTS['merger_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus/merger"
+#DEFAULTS['catalog_parent'] = "/mnt/gosling1/boryanah/light_cone_catalog/"
+DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
 DEFAULTS['z_start'] = 0.5
 DEFAULTS['z_stop'] = 0.8
 CONSTANTS = {'c': 299792.458}  # km/s, speed of light
@@ -204,7 +204,9 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
     Will need one padding superslab in the previous
     merger epoch.  Can process in a rolling fashion.
     '''
-    
+
+    merger_parent = Path(merger_parent)
+    catalog_parent = Path(catalog_parent)
     merger_dir = merger_parent / sim_name
     header = get_one_header(merger_dir)
     
@@ -733,8 +735,8 @@ if __name__ == '__main__':
     parser.add_argument('--sim_name', help='Simulation name', default=DEFAULTS['sim_name'])
     parser.add_argument('--z_start', help='Initial redshift where we start building the trees', type=float, default=DEFAULTS['z_start'])
     parser.add_argument('--z_stop', help='Final redshift (inclusive)', type=float, default=DEFAULTS['z_stop'])
-    parser.add_argument('--merger_parent', help='Merger tree directory', default=DEFAULTS['merger_parent'])
-    parser.add_argument('--catalog_parent', help='Light cone catalog directory', default=DEFAULTS['catalog_parent'])
+    parser.add_argument('--merger_parent', help='Merger tree directory', default=(DEFAULTS['merger_parent']))
+    parser.add_argument('--catalog_parent', help='Light cone catalog directory', default=(DEFAULTS['catalog_parent']))
     parser.add_argument('--resume', help='Resume the calculation from the checkpoint on disk', action='store_true')
     parser.add_argument('--plot', help='Want to show plots', action='store_true')
     
