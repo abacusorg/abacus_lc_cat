@@ -34,12 +34,12 @@ DEFAULTS = {}
 DEFAULTS['sim_name'] = "AbacusSummit_highbase_c021_ph000"
 #DEFAULTS['sim_name'] = "AbacusSummit_highbase_c000_ph100"
 #DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
-#DEFAULTS['compaso_parent'] = Path("/mnt/gosling2/bigsims")
-DEFAULTS['compaso_parent'] = Path("/global/project/projectdirs/desi/cosmosim/Abacus")
-#DEFAULTS['catalog_parent'] = Path("/mnt/gosling1/boryanah/light_cone_catalog/")
-DEFAULTS['catalog_parent'] = Path("/global/cscratch1/sd/boryanah/light_cone_catalog/")
-#DEFAULTS['merger_parent'] = Path("/mnt/gosling2/bigsims/merger")
-DEFAULTS['merger_parent'] = Path("/global/project/projectdirs/desi/cosmosim/Abacus/merger")
+#DEFAULTS['compaso_parent'] = "/mnt/gosling2/bigsims")
+DEFAULTS['compaso_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus"
+#DEFAULTS['catalog_parent'] = "/mnt/gosling1/boryanah/light_cone_catalog/"
+DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
+#DEFAULTS['merger_parent'] = "/mnt/gosling2/bigsims/merger"
+DEFAULTS['merger_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus/merger"
 DEFAULTS['z_start'] = 0.5
 DEFAULTS['z_stop'] = 0.8
 CONSTANTS = {'c': 299792.458}  # km/s, speed of light
@@ -64,6 +64,10 @@ def correct_all_inds(halo_ids, N_halo_slabs, slabs, n_chunks):
     return ids
 
 def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_parent, save_pos=False):
+
+    compaso_parent = Path(compaso_parent)
+    catalog_parent = Path(catalog_parent)
+    merger_parent = Path(merger_parent)
 
     # directory where the CompaSO halo catalogs are saved
     cat_dir = compaso_parent / sim_name / "halos"
@@ -290,9 +294,9 @@ if __name__ == '__main__':
     parser.add_argument('--sim_name', help='Simulation name', default=DEFAULTS['sim_name'])
     parser.add_argument('--z_start', help='Initial redshift where we start building the trees', type=float, default=DEFAULTS['z_start'])
     parser.add_argument('--z_stop', help='Final redshift (inclusive)', type=float, default=DEFAULTS['z_stop'])
-    parser.add_argument('--compaso_parent', help='CompaSO directory', default=DEFAULTS['compaso_parent'])
-    parser.add_argument('--catalog_parent', help='Light cone catalog directory', default=DEFAULTS['catalog_parent'])
-    parser.add_argument('--merger_parent', help='Merger tree directory', default=DEFAULTS['merger_parent'])
+    parser.add_argument('--compaso_parent', help='CompaSO directory', default=(DEFAULTS['compaso_parent']))
+    parser.add_argument('--catalog_parent', help='Light cone catalog directory', default=(DEFAULTS['catalog_parent']))
+    parser.add_argument('--merger_parent', help='Merger tree directory', default=(DEFAULTS['merger_parent']))
     parser.add_argument('--save_pos', help='Want to save positions', action='store_true')
     
     args = vars(parser.parse_args())
