@@ -254,21 +254,18 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
         else:
             pid_table = Table({'pid': np.zeros(len(pid_new), pid_new.dtype)})
         pid_table['pid'] = pid_new
-        print("pid new ",len(np.unique(pid_new))*100./len(pid_new))
         del pid_new
 
         # isolate halos that did not have interpolation and get the velocity from the halo info files
         not_interp = (np.sum(np.abs(vel_interp_lc),axis=1) - 0.) < 1.e-6
         vel_interp_lc[not_interp] = halo_table['v_L2com'][not_interp]
         print("percentage not interpolated = ", 100.*np.sum(not_interp)/len(not_interp))
-        print("mean, min, max chi = ", np.mean(chi_interp_lc), np.min(chi_interp_lc), np.max(chi_interp_lc))
         
         # append new fields
         halo_table['index_halo'] = halo_ind_lc
         halo_table['pos_interp'] = pos_interp_lc
         halo_table['vel_interp'] = vel_interp_lc
         halo_table['redshift_interp'] = z_of_chi(chi_interp_lc)
-        print("halo id new ",len(np.unique(halo_ind_lc))*100./len(halo_ind_lc))
         
         del halo_ind_lc, pos_interp_lc, vel_interp_lc, not_interp, chi_interp_lc
         

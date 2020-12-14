@@ -59,7 +59,9 @@ def extract_steps(fn):
     return step
 
 def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merger_parent):
-    
+    light_cone_parent = Path(light_cone_parent)
+    catalog_parent = Path(catalog_parent)
+    merger_parent = Path(merger_parent)
 
     # directory where the merger tree files are kept
     merger_dir = merger_parent / sim_name
@@ -225,6 +227,7 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
                 # match merger tree and light cone pids
                 print("starting")
                 
+                # original version start
                 t1 = time.time()
                 i_sort_lc_pid = np.argsort(lc_pid)
                 mt_in_lc = match(mt_pid, lc_pid, arr2_index=i_sort_lc_pid)
@@ -238,6 +241,7 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
                 
                 # print percentage of matched pids
                 print("at z = %.3f, matched = "%mt_z,len(comm1)*100./(len(mt_pid)))
+                # original version end
                 
                 '''
                 # alternative Lehman implementation start
