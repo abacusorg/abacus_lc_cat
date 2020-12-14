@@ -26,7 +26,7 @@ import argparse
 from astropy.table import Table
 
 from tools.InputFile import InputFile
-from tools.merger import simple_load, get_zs_from_headers, get_halos_per_slab, get_one_header, unpack_inds, pack_inds, reorder_by_slab
+from tools.merger import simple_load, get_zs_from_headers, get_halos_per_slab, get_one_header, unpack_inds, pack_inds, reorder_by_slab, mark_ineligible
 from tools.aid_asdf import save_asdf
 from tools.read_headers import get_lc_info
 from tools.compute_dist import dist
@@ -85,31 +85,6 @@ def correct_inds(halo_ids, N_halos_slabs, slabs, inds_fn):
         ids[select] += offsets[i]
 
     return ids
-
-def mark_ineligible(nums, starts, main_progs, progs, halo_ind_prev, eligibility_prev, N_halos_slabs_prev, slabs_prev, inds_fn_prev):
-    N_this_star_lc = len(nums)
-    # loop around halos that were marked belonging to this redshift catalog
-    for j in range(N_this_star_lc):
-        # select all progenitors
-        start = starts[j]
-        num = nums[j]
-        prog_inds = progs[start : start + num]
-
-        # remove progenitors with no info
-        prog_inds = prog_inds[prog_inds > 0]
-        if len(prog_inds) == 0: continue
-
-        # correct halo indices
-        prog_inds = correct_inds(prog_inds, N_halos_slabs_prev, slabs_prev, inds_fn_prev)
-        halo_inds = halo_ind_prev[prog_inds]
-
-        # test output; remove in final version
-        #if num > 1: print(halo_inds, Merger_prev['HaloIndex'][main_progs[j]])
-
-        # mark ineligible
-        eligibility_prev[halo_inds] = False
-    return eligibility_prev
-
 
 def get_mt_info(fn_load, fields, minified):
     '''
@@ -632,7 +607,13 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                     main_progs = Merger_this_info_lc['MainProgenitor'][bool_star_this_info_lc]
                     progs = mt_data_this['progenitors']['Progenitors']
                     halo_ind_prev = Merger_prev['HaloIndex']
-                    mark_ineligible(nums, starts, main_progs, progs, halo_ind_prev, eligibility_prev, N_halos_slabs_prev, slabs_prev, inds_fn_prev)
+
+                    N_halos_load = np.array([N_halos_slabs_prev[i] for i in inds_fn_prev])
+                    slabs_prev_load = np.array([slabs_prev[i] for i in slabs_prev[inds_fn_prev]],dtype=np.int64)
+                    offsets = np.zeros(len(inds_fn_prev), dtype=np.int64)
+                    offsets[1:] = np.cumsum(N_halos_load)[:-1]
+                    
+                    mark_ineligible(nums, starts, main_progs, progs, halo_ind_prev, eligibility_prev, offsets, slabs_prev_load)
                                     
                 # information to keep for next redshift considered
                 N_next = np.sum(~bool_star_this_info_lc)

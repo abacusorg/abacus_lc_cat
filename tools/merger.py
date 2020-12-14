@@ -3,6 +3,7 @@ import numpy as np
 import scipy.stats as scist
 import matplotlib.pyplot as plt
 from astropy.table import Table
+from numba import jit
 
 def extract_superslab(fn):
     # looks like "associations_z0.100.0.asdf"
@@ -72,6 +73,69 @@ def reorder_by_slab(fns,minified):
         return sorted(fns, key=extract_superslab_minified)
     else:
         return sorted(fns, key=extract_superslab)
+
+def mark_ineligible_slow(nums, starts, main_progs, progs, halo_ind_prev, eligibility_prev, N_halos_slabs_prev, slabs_prev, inds_fn_prev):
+    N_this_star_lc = len(nums)
+    # loop around halos that were marked belonging to this redshift catalog
+    for j in range(N_this_star_lc):
+        # select all progenitors
+        start = starts[j]
+        num = nums[j]
+        prog_inds = progs[start : start + num]
+
+        # remove progenitors with no info
+        prog_inds = prog_inds[prog_inds > 0]
+        if len(prog_inds) == 0: continue
+
+        # correct halo indices
+        prog_inds = correct_inds(prog_inds, N_halos_slabs_prev, slabs_prev, inds_fn_prev)
+        halo_inds = halo_ind_prev[prog_inds]
+
+        # test output; remove in final version
+        #if num > 1: print(halo_inds, Merger_prev['HaloIndex'][main_progs[j]])
+
+        # mark ineligible
+        eligibility_prev[halo_inds] = False
+    return eligibility_prev
+
+@jit(nopython = True)
+def mark_ineligible(nums, starts, main_progs, progs, halo_ind_prev, eligibility_prev, offsets, slabs_prev_load):
+    # constants used for unpacking
+    id_factor = int(1e12)
+    slab_factor = int(1e9)
+
+    # number of objects marked belonging to this redshift catalog
+    N_this_star_lc = len(nums)
+    # loop around halos that were marked belonging to this redshift catalog
+    for j in range(N_this_star_lc):
+        # select all progenitors
+        start = starts[j]
+        num = nums[j]
+        prog_inds = progs[start : start + num]
+
+        # remove progenitors with no info
+        prog_inds = prog_inds[prog_inds > 0]
+        if len(prog_inds) == 0: continue
+
+        # correct halo indices
+        for k in range(len(prog_inds)):
+            prog_ind = prog_inds[k]
+            idx = (prog_ind % slab_factor)
+            slab_id = ((prog_ind % id_factor - idx) // slab_factor)
+            for i in range(len(slabs_prev_load)):
+                slab_prev_load = slabs_prev_load[i]
+                if slab_id == slab_prev_load:
+                    idx += offsets[i]
+            prog_inds[k] = idx
+        # find halo indices in previous snapshot
+        halo_inds = halo_ind_prev[prog_inds]
+
+        # test output; remove in final version
+        #if num > 1: print(halo_inds, halo_ind_prev[main_progs[j]])
+
+        # mark ineligible
+        eligibility_prev[halo_inds] = False
+    return eligibility_prev
 
 
 def simple_load(filenames, fields):
