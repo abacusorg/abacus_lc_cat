@@ -29,7 +29,7 @@ from tools.InputFile import InputFile
 from tools.merger import simple_load, get_zs_from_headers, get_halos_per_slab, get_one_header, unpack_inds, pack_inds, reorder_by_slab, mark_ineligible
 from tools.aid_asdf import save_asdf
 from tools.read_headers import get_lc_info
-from tools.compute_dist import dist
+from tools.compute_dist import dist, wrapping
 
 # these are probably just for testing; should be removed for production
 DEFAULTS = {}
@@ -64,21 +64,6 @@ def correct_inds(halo_ids, N_halos_slabs, slabs, inds_fn):
     # determine if unpacking halos for only one file (Merger_this['HaloIndex']) -- no need to offset 
     if len(inds_fn) == 1: return ids
 
-    '''
-    # an attempt to speed up code but might be slower than currently done
-    # TODO: there's a bug, ask Lehman (not necessary to fix)
-    # determine if indices are contiguous in terms of their chunk number (np.unique will return slab_unique sorted)
-    slab_unique, slab_first_ids = np.unique(slab_ids, return_index=True)
-    contiguous = True
-    for i in range(len(slab_first_ids)):
-        if slab_first_ids[i] != offsets[np.argsort(inds_fn)][i] or slab_unique[i] != np.sort(inds_fn)[i]:
-            contiguous = False
-    if contiguous:
-        for i in range(len(slab_first_ids)):
-            ids[N_halos_load[i]*i:N_halos_load[i]*(i+1)] += offsets[i]
-        return ids
-    ''' 
-
     # select the halos belonging to given slab
     for i, ind_fn in enumerate(inds_fn):
         select = np.where(slab_ids == slabs[ind_fn])[0]
@@ -108,30 +93,56 @@ def get_mt_info(fn_load, fields, minified):
         
     return mt_data
 
-def solve_crossing(r1, r2, pos1, pos2, chi1, chi2, Lbox, origin):
+def solve_crossing(r1, r2, pos1, pos2, chi1, chi2, Lbox, origin, extra=4.):
     '''
     Solve when the crossing of the light cones occurs and the
     interpolated position and velocity
     '''
+
+    # numba version
+    r1, r2, pos1, pos2 = wrapping(r1, r2, pos1, pos2, chi1, chi2, Lbox, origin)
     
-    # identify where the distance between this object and its main progenitor is larger than half the boxsize (or really even 4 Mpc/h since that is Sownak's boundary)
+    # incredibly long and not very intelligent version
+    '''
+    # first condition identifies where the distance between this object and its main progenitor
+    # is larger than half the boxsize (or really even 4 Mpc/h since that is Sownak's boundary)
     delta_pos = np.abs(pos2 - pos1)
-    delta_pos = np.where(delta_pos > 0.5 * Lbox, (delta_pos - Lbox), delta_pos)
-    delta_sign = np.sign(pos1 - pos2)
 
-    # move the halos so that you keep things continuous
-    pos1 = pos2 + delta_sign * delta_pos
-    r1 = dist(pos1, origin)
-    r2 = dist(pos2, origin)
+    # second condition selects objects satisfying `cond_1/2' (i.e. within delta chi for z_prev/z_this)
+    # third condition figures out
+    # objects that are wrapped around on the other side of the box will have positive positions until later redshifts
+    inds = np.where((delta_pos > 0.5 * Lbox) & ((r1[:, None] > chi1) | (r1[:, None] <= chi2)) & (pos1 > 0.))
+    pos1[inds] -= Lbox
+    r1[inds[0]] = dist(pos1[inds[0]], origin)
+    delta_pos[inds[0]] = np.abs(pos2[inds[0]] - pos1[inds[0]])
+    
+    inds = np.where((delta_pos > 0.5 * Lbox) & ((r2[:, None] > chi1) | (r2[:, None] <= chi2)) & (pos2 > 0.))
+    pos2[inds] -= Lbox
+    r2[inds[0]] = dist(pos2[inds[0]], origin)
+    delta_pos[inds[0]] = np.abs(pos2[inds[0]] - pos1[inds[0]])
+    
+    # at later redshifts we may have wrapped objects that have negative positions.
+    inds = np.where((delta_pos > 0.5 * Lbox) & ((r1[:, None] > chi1) | (r1[:, None] <= chi2)) & (pos1 < 0.))
+    pos1[inds] += Lbox
+    r1[inds[0]] = dist(pos1[inds[0]], origin)
+    delta_pos[inds[0]] = np.abs(pos2[inds[0]] - pos1[inds[0]])
+    
+    inds = np.where((delta_pos > 0.5 * Lbox) & ((r2[:, None] > chi1) | (r2[:, None] <= chi2)) & (pos2 < 0.))
+    pos2[inds] += Lbox
+    r2[inds[0]] = dist(pos2[inds[0]], origin)
+    delta_pos[inds[0]] = np.abs(pos2[inds[0]] - pos1[inds[0]])
+    '''
 
-    # solve for chi_star, where chi = eta_0-eta
+    # assert wrapping worked
+    assert np.all(((r2 <= chi1) & (r2 > chi2)) | ((r1 <= chi1) & (r1 > chi2))), "Wrapping didn't work"
+    
+    # solve for chi_star, where chi(z) = eta(z=0)-eta(z)
     # equation is r1+(chi1-chi)/(chi1-chi2)*(r2-r1) = chi, with solution:
     chi_star = (r1 * (chi1 - chi2) + chi1 * (r2 - r1)) / ((chi1 - chi2) + (r2 - r1))
 
     # get interpolated positions of the halos
-    v_avg = (pos2 - pos1) / (chi1 - chi2)  # og
+    v_avg = (pos2 - pos1) / (chi1 - chi2)
     pos_star = pos1 + v_avg * (chi1 - chi_star[:, None])
-
 
     # enforce boundary conditions by periodic wrapping
     pos_star[pos_star >= Lbox/2.] = pos_star[pos_star >= Lbox/2.] - Lbox
@@ -148,10 +159,10 @@ def solve_crossing(r1, r2, pos1, pos2, chi1, chi2, Lbox, origin):
     bool_star = np.abs(chi1 - chi_star) > np.abs(chi2 - chi_star)
 
     # condition to check whether halo in this light cone band
-    # assert np.sum((chi_star > chi1) | (chi_star < chi2)) == 0, "Solution is out of bounds"
-    
-    return chi_star, pos_star, vel_star, bool_star
+    assert np.all(((chi_star <= chi1+extra) & (chi_star > chi2-extra))), "Solution is out of bounds"
 
+    return chi_star, pos_star, vel_star, bool_star
+    
 def offset_pos(pos,ind_origin,all_origins):
     '''
     Offset the interpolated positions to create continuous light cones
@@ -190,11 +201,11 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
     # location of the LC origins in Mpc/h
     origins = np.array(header['LightConeOrigins']).reshape(-1,3)
 
-    '''
+    
     # just for testing with highbase. remove!
     if 'highbase' in sim_name:
         origins /= 2.
-    '''
+    
     
     # directory where we save the final outputs
     cat_lc_dir = catalog_parent / sim_name / "halos_light_cones/"
@@ -207,12 +218,14 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
     
     # all redshifts, steps and comoving distances of light cones files; high z to low z
     # remove presaving after testing done (or make sure presaved can be matched with simulation)
-    if not os.path.exists("data_headers/coord_dist.npy") or not os.path.exists("data_headers/redshifts.npy"):
+    if not os.path.exists(Path("data_headers") / sim_name / "coord_dist.npy") or not os.path.exists(Path("data_headers") / sim_name / "redshifts.npy"):
         zs_all, steps, chis_all = get_lc_info("all_headers")
-        np.save("data_headers/redshifts.npy", zs_all)
-        np.save("data_headers/coord_dist.npy", chis_all)
-    zs_all = np.load("data_headers/redshifts.npy")
-    chis_all = np.load("data_headers/coord_dist.npy")
+        os.makedirs(Path("data_headers") / sim_name, exist_ok=True)
+        np.save(Path("data_headers") / sim_name / "redshifts.npy", zs_all)
+        np.save(Path("data_headers") / sim_name / "steps.npy", steps_all)
+        np.save(Path("data_headers") / sim_name / "coord_dist.npy", chis_all)
+    zs_all = np.load(Path("data_headers") / sim_name / "redshifts.npy")
+    chis_all = np.load(Path("data_headers") / sim_name / "coord_dist.npy")
     zs_all[-1] = float("%.1f" % zs_all[-1])  # LHG: I guess this is trying to match up to some filename or something?
 
     # get functions relating chi and z
@@ -435,10 +448,10 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                 
                 # select objects that are crossing the light cones
                 # TODO: revise conservative choice if stranded between two ( & \) less conservative ( | \ )
-                mask_lc_this_info = (
-                    ((Merger_this_info['ComovingDistance'] > chi_this) & (Merger_this_info['ComovingDistance'] <= chi_prev))
-                )
-                #| ((Merger_prev_main_this_info['ComovingDistance'] > chi_this) & (Merger_prev_main_this_info['ComovingDistance'] <= chi_prev))
+                cond_1 = ((Merger_this_info['ComovingDistance'] > chi_this) & (Merger_this_info['ComovingDistance'] <= chi_prev))
+                cond_2 = ((Merger_prev_main_this_info['ComovingDistance'] > chi_this) & (Merger_prev_main_this_info['ComovingDistance'] <= chi_prev))
+                mask_lc_this_info = cond_1 | cond_2
+                del cond_1, cond_2
 
                 mask_lc_this_noinfo = (
                     (Merger_this_noinfo['ComovingDistance'] > chi_this - delta_chi_old / 2.0)
@@ -597,7 +610,6 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                 
                 # version 2: all progenitors of halos belonging to this redshift catalog are marked ineligible 
                 # run version 1 AND 2 to mark ineligible Merger_next objects to avoid multiple entries
-                # optimize with numba if possible (ask Lehman)
                 # Note that some progenitor indices are zeros;
                 # For best result perhaps combine Progs with MainProgs 
                 if "Progenitors" in fields_mt:

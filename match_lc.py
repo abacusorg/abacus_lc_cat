@@ -89,14 +89,15 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
 
     # all redshifts, steps and comoving distances of light cones files; high z to low z
     # remove presaving after testing done (or make sure presaved can be matched with simulation)
-    if not os.path.exists("data_headers/coord_dist.npy") or not os.path.exists("data_headers/redshifts.npy"):
+    if not os.path.exists(Path("data_headers") / sim_name / "coord_dist.npy") or not os.path.exists(Path("data_headers") / sim_name / "redshifts.npy") or not os.path.exists(Path("data_headers") / sim_name / "steps.npy"):
         zs_all, steps, chis_all = get_lc_info("all_headers")
-        np.save("data_headers/redshifts.npy", zs_all)
-        np.save("data_headers/steps.npy", steps_all)
-        np.save("data_headers/coord_dist.npy", chis_all)
-    zs_all = np.load("data_headers/redshifts.npy")
-    steps_all = np.load("data_headers/steps.npy")
-    chis_all = np.load("data_headers/coord_dist.npy")
+        os.makedirs(Path("data_headers") / sim_name, exist_ok=True)
+        np.save(Path("data_headers") / sim_name / "redshifts.npy", zs_all)
+        np.save(Path("data_headers") / sim_name / "steps.npy", steps_all)
+        np.save(Path("data_headers") / sim_name / "coord_dist.npy", chis_all)
+    zs_all = np.load(Path("data_headers") / sim_name / "redshifts.npy")
+    steps_all = np.load(Path("data_headers") / sim_name / "steps.npy")
+    chis_all = np.load(Path("data_headers") / sim_name / "coord_dist.npy")
     zs_all[-1] = float("%.1f" % zs_all[-1])
 
     # time step of furthest and closest shell in the light cone files

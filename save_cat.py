@@ -102,12 +102,13 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
     
     # all redshifts, steps and comoving distances of light cones files; high z to low z
     # remove presaving after testing done (or make sure presaved can be matched with simulation)
-    if not os.path.exists("data_headers/coord_dist.npy") or not os.path.exists("data_headers/redshifts.npy"):
+    if not os.path.exists(Path("data_headers") / sim_name / "coord_dist.npy") or not os.path.exists(Path("data_headers") / sim_name / "redshifts.npy"):
         zs_all, steps, chis_all = get_lc_info("all_headers")
-        np.save("data_headers/redshifts.npy", zs_all)
-        np.save("data_headers/coord_dist.npy", chis_all)
-    zs_all = np.load("data_headers/redshifts.npy")
-    chis_all = np.load("data_headers/coord_dist.npy")
+        os.makedirs(Path("data_headers") / sim_name, exist_ok=True)
+        np.save(Path("data_headers") / sim_name / "redshifts.npy", zs_all)
+        np.save(Path("data_headers") / sim_name / "coord_dist.npy", chis_all)
+    zs_all = np.load(Path("data_headers") / sim_name / "redshifts.npy")
+    chis_all = np.load(Path("data_headers") / sim_name / "coord_dist.npy")
     zs_all[-1] = float("%.1f" % zs_all[-1])  # LHG: I guess this is trying to match up to some filename or something?
 
     # get functions relating chi and z
