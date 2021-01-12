@@ -99,40 +99,9 @@ def solve_crossing(r1, r2, pos1, pos2, chi1, chi2, Lbox, origin, extra=4.):
     interpolated position and velocity
     '''
 
-    # numba version
+    # periodic wrapping of the positions of the particles
     r1, r2, pos1, pos2 = wrapping(r1, r2, pos1, pos2, chi1, chi2, Lbox, origin)
     
-    # incredibly long and not very intelligent version
-    '''
-    # first condition identifies where the distance between this object and its main progenitor
-    # is larger than half the boxsize (or really even 4 Mpc/h since that is Sownak's boundary)
-    delta_pos = np.abs(pos2 - pos1)
-
-    # second condition selects objects satisfying `cond_1/2' (i.e. within delta chi for z_prev/z_this)
-    # third condition figures out
-    # objects that are wrapped around on the other side of the box will have positive positions until later redshifts
-    inds = np.where((delta_pos > 0.5 * Lbox) & ((r1[:, None] > chi1) | (r1[:, None] <= chi2)) & (pos1 > 0.))
-    pos1[inds] -= Lbox
-    r1[inds[0]] = dist(pos1[inds[0]], origin)
-    delta_pos[inds[0]] = np.abs(pos2[inds[0]] - pos1[inds[0]])
-    
-    inds = np.where((delta_pos > 0.5 * Lbox) & ((r2[:, None] > chi1) | (r2[:, None] <= chi2)) & (pos2 > 0.))
-    pos2[inds] -= Lbox
-    r2[inds[0]] = dist(pos2[inds[0]], origin)
-    delta_pos[inds[0]] = np.abs(pos2[inds[0]] - pos1[inds[0]])
-    
-    # at later redshifts we may have wrapped objects that have negative positions.
-    inds = np.where((delta_pos > 0.5 * Lbox) & ((r1[:, None] > chi1) | (r1[:, None] <= chi2)) & (pos1 < 0.))
-    pos1[inds] += Lbox
-    r1[inds[0]] = dist(pos1[inds[0]], origin)
-    delta_pos[inds[0]] = np.abs(pos2[inds[0]] - pos1[inds[0]])
-    
-    inds = np.where((delta_pos > 0.5 * Lbox) & ((r2[:, None] > chi1) | (r2[:, None] <= chi2)) & (pos2 < 0.))
-    pos2[inds] += Lbox
-    r2[inds[0]] = dist(pos2[inds[0]], origin)
-    delta_pos[inds[0]] = np.abs(pos2[inds[0]] - pos1[inds[0]])
-    '''
-
     # assert wrapping worked
     assert np.all(((r2 <= chi1) & (r2 > chi2)) | ((r1 <= chi1) & (r1 > chi2))), "Wrapping didn't work"
     
@@ -190,7 +159,8 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
     Will need one padding superslab in the previous
     merger epoch.  Can process in a rolling fashion.
     '''
-
+    
+    # turn directories into Paths
     merger_parent = Path(merger_parent)
     catalog_parent = Path(catalog_parent)
     merger_dir = merger_parent / sim_name
@@ -232,13 +202,14 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
     chi_of_z = interp1d(zs_all, chis_all)
     z_of_chi = interp1d(chis_all, zs_all)
     
-    # more accurate, slightly slower
-    if not os.path.exists("data/zs_mt.npy"):
+    # if merger tree redshift information has been saved, load it (if not, save it)
+    if not os.path.exists(Path("data_mt") / sim_name / "zs_mt.npy"):
         # all merger tree snapshots and corresponding redshifts
         snaps_mt = sorted(merger_dir.glob("associations_z*.0.asdf"))
         zs_mt = get_zs_from_headers(snaps_mt)
-        np.save("data/zs_mt.npy", zs_mt)
-    zs_mt = np.load("data/zs_mt.npy")
+        os.makedirs(Path("data_mt") / sim_name, exist_ok=True)
+        np.save(Path("data_mt") / sim_name / "zs_mt.npy", zs_mt)
+    zs_mt = np.load(Path("data_mt") / sim_name / "zs_mt.npy")
 
     # number of chunks
     n_chunks = len(list(merger_dir.glob("associations_z%4.3f.*.asdf"%zs_mt[0])))
@@ -276,7 +247,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
     # redshift of closest point on wall between original and copied box
     z1 = z_of_chi(0.5 * Lbox - origins[0][0])
     # redshift of closest point where all three boxes touch
-    # z2 = z_of_chi((0.5*Lbox-origin[0])*np.sqrt(2))
+    z2 = z_of_chi((0.5*Lbox-origin[0])*np.sqrt(2))
     # furthest point where all three boxes touch;
     z3 = z_of_chi((0.5 * Lbox - origins[0][0]) * np.sqrt(3))
 
@@ -321,8 +292,8 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
         print("number of files = ", len(fns_this), len(fns_prev))
         assert n_chunks == len(fns_this) and n_chunks == len(fns_prev), "Incomplete merger tree files"
         # reorder file names by super slab number
-        fns_this = reorder_by_slab(fns_this,minified)
-        fns_prev = reorder_by_slab(fns_prev,minified)
+        fns_this = reorder_by_slab(fns_this, minified)
+        fns_prev = reorder_by_slab(fns_prev, minified)
 
         # get number of halos in each slab and number of slabs
         N_halos_slabs_this, slabs_this = get_halos_per_slab(fns_this, minified)
@@ -338,26 +309,24 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
         mt_prev[(first_ss-1)%n_chunks] = get_mt_info(fns_prev[(first_ss-1)%n_chunks], fields=fields_mt, minified=minified)
         mt_prev[first_ss] = get_mt_info(fns_prev[first_ss], fields=fields_mt, minified=minified)
 
-        # for each chunk
+        # loop over each chunk
         for k in range(first_ss,n_chunks):
             # starting and finishing superslab chunks
             klow = (k-1)%n_chunks
             khigh = (k+1)%n_chunks
             
-            # Slide down by one
+            # slide down by one
             if (klow-1)%n_chunks in mt_prev:
                 del mt_prev[(klow-1)%n_chunks]
             mt_prev[khigh] = get_mt_info(fns_prev[khigh], fields_mt, minified)
             
-            # starting and finishing superslab chunks; 
+            # starting and finishing superslab chunks
             inds_fn_this = [k]
             inds_fn_prev = np.array([klow,k,khigh],dtype=int)
-            
             print("chunks loaded in this and previous redshifts = ",inds_fn_this, inds_fn_prev)
+            
             # get merger tree data for this snapshot and for the previous one
-
             mt_data_this = get_mt_info(fns_this[k], fields_mt, minified)
-            #mt_data_prev, N_halos_slabs_prev, slabs_prev = get_mt_info(fns_prev,fields_mt,minified,inds_fn_prev)
             
             # number of halos in this step and previous step; this depends on the number of files requested
             N_halos_this = np.sum(N_halos_slabs_this[inds_fn_this])
@@ -365,18 +334,15 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
             print("N_halos_this = ", N_halos_this)
             print("N_halos_prev = ", N_halos_prev)
 
+            # organize data into astropy tables
             Merger_this = mt_data_this['merger']
-            #Merger_prev = mt_data_prev['merger']
             cols = {col:np.empty(N_halos_prev, dtype=(Merger_this[col].dtype, Merger_this[col].shape[1] if 'Position' in col else 1)) for col in Merger_this.keys()}
             Merger_prev = Table(cols, copy=False)
             offset = 0
             for key in mt_prev.keys():
                 size_chunk = len(mt_prev[key]['merger']['HaloIndex'])
-                #for col in Merger_this.keys():
-                #Merger_prev[col][offset:offset+size_chunk] = mt_prev[key]['merger'][:]
                 Merger_prev[offset:offset+size_chunk] = mt_prev[key]['merger'][:]
                 offset += size_chunk
-            # TODO: maybe improve to reduce I/O
                 
             # mask where no merger tree info is available (because we don'to need to solve for eta star for those)
             noinfo_this = Merger_this['MainProgenitor'] <= 0
@@ -401,7 +367,6 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                 slabs_prev,
                 inds_fn_prev,
             )
-            # maybe don't change
             Merger_prev['HaloIndex'] = correct_inds(
                 Merger_prev['HaloIndex'],
                 N_halos_slabs_prev,
@@ -447,12 +412,12 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                 Merger_this_noinfo = Merger_this[mask_noinfo_this].copy()
                 
                 # select objects that are crossing the light cones
-                # TODO: revise conservative choice if stranded between two ( & \) less conservative ( | \ )
                 cond_1 = ((Merger_this_info['ComovingDistance'] > chi_this) & (Merger_this_info['ComovingDistance'] <= chi_prev))
                 cond_2 = ((Merger_prev_main_this_info['ComovingDistance'] > chi_this) & (Merger_prev_main_this_info['ComovingDistance'] <= chi_prev))
                 mask_lc_this_info = cond_1 | cond_2
                 del cond_1, cond_2
 
+                # for hals that have no merger tree information, we simply take their current position
                 mask_lc_this_noinfo = (
                     (Merger_this_noinfo['ComovingDistance'] > chi_this - delta_chi_old / 2.0)
                     & (Merger_this_noinfo['ComovingDistance'] <= chi_this + delta_chi / 2.0)
@@ -504,7 +469,6 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                     plt.legend()
                     plt.axis('equal')
                     plt.savefig('prev_%d_%d_%d.png'%(i,k,o))
-                    #plt.show()
                     plt.close()
                     
                 # select halos without mt info that have had a light cone crossing
@@ -532,16 +496,14 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                     origin
                 )
 
-                # TESTING
-                #bool_star_this_info_lc = np.ones(len(bool_star_this_info_lc),dtype=bool)
-
                 # number of objects in this light cone
                 N_this_star_lc = np.sum(bool_star_this_info_lc)
                 N_this_noinfo_lc = np.sum(mask_lc_this_noinfo)
 
                 if i != ind_start or resume_flags[k, o]:
-                    # cheap way to deal with the fact that sometimes we won't have information about all light cone origins for certain chunks and epochs
+                    # check if we have information about this light cone origin, chunk and epoch
                     if os.path.exists(cat_lc_dir / "tmp" / ("Merger_next_z%4.3f_lc%d.%02d.asdf"%(z_this,o,k))):
+                        
                         # load leftover halos from previously loaded redshift
                         with asdf.open(cat_lc_dir / "tmp" / ("Merger_next_z%4.3f_lc%d.%02d.asdf"%(z_this,o,k)), lazy_load=True, copy_arrays=True) as f:
                             Merger_next = f['data']
@@ -555,7 +517,6 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
 
                 # total number of halos belonging to this light cone superslab and origin
                 N_lc = N_this_star_lc + N_this_noinfo_lc + N_next_lc
-                
                 print("in this snapshot: interpolated, no info, next, total = ", N_this_star_lc * 100.0 / N_lc, N_this_noinfo_lc * 100.0 / N_lc, N_next_lc * 100.0 / N_lc, N_lc)
                 
                 # save those arrays
@@ -594,7 +555,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                     resume_flags[k, o] = False
                 
                 # offset position to make light cone continuous
-                Merger_lc['InterpolatedPosition'] = offset_pos(Merger_lc['InterpolatedPosition'],ind_origin=o,all_origins=origins)
+                Merger_lc['InterpolatedPosition'] = offset_pos(Merger_lc['InterpolatedPosition'], ind_origin = o, all_origins=origins)
 
                 # create directory for this redshift
                 os.makedirs(cat_lc_dir / ("z%.3f"%z_this), exist_ok=True)
@@ -670,8 +631,8 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                     # circles for in and prev
                     ax.add_artist(circle_this)
                     ax.add_artist(circle_prev)
-                    plt.xlabel([-1000, 3000])
-                    plt.ylabel([-1000, 3000])
+                    plt.xlabel([-Lbox/2., Lbox*1.5])
+                    plt.ylabel([-Lbox/2., Lbox*1.5])
                     plt.axis("equal")
                     plt.savefig('interp_%d_%d_%d.png'%(i,k,o))
                     #plt.show()
@@ -703,7 +664,6 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                     offset += N_halos_slabs_prev[idx]
 
                 # write as table the information about halos that are part of next loaded redshift
-                # TESTING don't save to test
                 save_asdf(Merger_next, ("Merger_next_z%4.3f_lc%d.%02d"%(z_prev, o, k)), header, cat_lc_dir / "tmp")
 
                 # save redshift of catalog that is next to load and difference in comoving between this and prev

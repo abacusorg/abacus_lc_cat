@@ -85,13 +85,14 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
     # directory where the merger tree files are kept
     merger_dir = merger_parent / sim_name
     
-    # more accurate, slightly slower
-    if not os.path.exists("data/zs_mt.npy"):
+    # if merger tree redshift information has been saved, load it (if not, save it)
+    if not os.path.exists(Path("data_mt") / sim_name / "zs_mt.npy"):
         # all merger tree snapshots and corresponding redshifts
         snaps_mt = sorted(merger_dir.glob("associations_z*.0.asdf"))
         zs_mt = get_zs_from_headers(snaps_mt)
-        np.save("data/zs_mt.npy", zs_mt)
-    zs_mt = np.load("data/zs_mt.npy")
+        os.makedirs(Path("data_mt") / sim_name, exist_ok=True)
+        np.save(Path("data_mt") / sim_name / "zs_mt.npy", zs_mt)
+    zs_mt = np.load(Path("data_mt") / sim_name / "zs_mt.npy")
 
     # names of the merger tree file for a given redshift
     merger_fns = list(merger_dir.glob("associations_z%4.3f.*.asdf"%zs_mt[0]))

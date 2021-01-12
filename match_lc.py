@@ -71,16 +71,6 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
     Lbox = header['BoxSize']
     PPD = header['ppd']
 
-    # more accurate, slightly slower
-    if not os.path.exists("data/zs_mt.npy"):
-        # all merger tree snapshots and corresponding redshifts
-        snaps_mt = sorted(merger_dir.glob("associations_z*.0.asdf"))
-        zs_mt = get_zs_from_headers(snaps_mt)
-        np.save("data/zs_mt.npy", zs_mt)
-    # TESTING remove
-    #zs_mt = np.load("data/zs_mt.npy")[:-1] # og
-    zs_mt = np.load("data/zs_mt.npy")[4:-4]
-
     # directory where we have saved the final outputs from merger trees and halo catalogs
     cat_lc_dir = catalog_parent / sim_name / "halos_light_cones"
 
@@ -99,6 +89,17 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
     steps_all = np.load(Path("data_headers") / sim_name / "steps.npy")
     chis_all = np.load(Path("data_headers") / sim_name / "coord_dist.npy")
     zs_all[-1] = float("%.1f" % zs_all[-1])
+
+    # if merger tree redshift information has been saved, load it (if not, save it)
+    if not os.path.exists(Path("data_mt") / sim_name / "zs_mt.npy"):
+        # all merger tree snapshots and corresponding redshifts
+        snaps_mt = sorted(merger_dir.glob("associations_z*.0.asdf"))
+        zs_mt = get_zs_from_headers(snaps_mt)
+        os.makedirs(Path("data_mt") / sim_name, exist_ok=True)
+        np.save(Path("data_mt") / sim_name / "zs_mt.npy", zs_mt)
+    zs_mt = np.load(Path("data_mt") / sim_name / "zs_mt.npy")
+    # correct for interpolation out of bounds error
+    zs_mt = zs_mt[(zs_mt <= zs_all.max()) & (zs_mt >= zs_all.min())]
 
     # time step of furthest and closest shell in the light cone files
     step_min = np.min(steps_all)
