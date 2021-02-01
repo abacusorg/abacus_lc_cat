@@ -28,8 +28,6 @@ seeds = [0]
 
 sim_slices = sorted(glob.glob(os.path.join(cat_lc_dir,'z*')))
 redshifts = [extract_redshift(sim_slices[i]) for i in range(len(sim_slices))]
-# TESTING
-redshifts = redshifts[:5]
 print("redshifts = ",redshifts)
 
 # load header to read parameters
@@ -89,12 +87,23 @@ if __name__ == "__main__":
     a_0 = 1./(1+z_0)
 
     # base HOD parameters
+    '''
     logM_cut = 12.27
     logM1 = 13.30
     sigma = 0.78
     alpha = 1.09
     kappa = 0.21
     params['model_no'] = 2
+    '''
+    p_max = 0.53
+    Q = 10.
+    logM_cut = 11.6
+    kappa = 1.
+    sigma = 0.58
+    logM1 = 13.23
+    alpha = 0.9
+    gamma = 4.12
+    params['model_no'] = 3
     
     # first derivative parameters
     logM_cut_prime = 1.
@@ -112,7 +121,7 @@ if __name__ == "__main__":
         print("Files exist for z = ",redshift)
 
         # TESTING
-        if redshift > 0.8: continue
+        if redshift > 1.1: continue
         
         newparam = params.copy()
         newparam['subsample_directory'] = sim_slices[i]
@@ -124,13 +133,23 @@ if __name__ == "__main__":
         logM_cut_this = taylor_expand(logM_cut,logM_cut_prime,a,a_0)
         logM1_this = taylor_expand(logM1,logM1_prime,a,a_0)
         print("logM_cut, logM1 = %.3f %.3f"%(logM_cut_this,logM1_this))
-        
+
+        newdesign = {'p_max': p_max,
+                     'Q': Q,
+                     'logM_cut': logM_cut_this,
+                     'kappa': kappa,
+                     'sigma': sigma,
+                     'logM1': logM1_this,
+                     'alpha': alpha,
+                     'gamma': gamma}
+        '''                                                           
         newdesign = {'M_cut': 10.**logM_cut_this, 
                      'M1': 10.**logM1_this,
                      'sigma': sigma,
                      'alpha': alpha,
                      'kappa': kappa}
-
+        '''
+        
         newdesigns.append(newdesign)
 
     
@@ -138,7 +157,7 @@ if __name__ == "__main__":
     #gen_gal_onesim_onehod(newdesign,newparam)
 
     
-    p = multiprocessing.Pool(10)
+    p = multiprocessing.Pool(40)
     p.starmap(gen_gal_onesim_onehod, zip(newdesigns,newparams))
     p.close()
     p.join()

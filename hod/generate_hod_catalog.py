@@ -16,7 +16,67 @@ import asdf
 import h5py
 from scipy import special
 from glob import glob
-from numba import jit
+from numba import jit, njit
+import math
+
+#@njit(fastmath=True)
+def n_cen_ELG(M_h, design_array):
+    """
+    HOD function for ELG centrals taken from arXiv:1910.05095.
+    """
+    p_max, Q, logM_cut, kappa, sigma, logM1, alpha, gamma = design_array[0], design_array[1], design_array[2], design_array[3], design_array[4], design_array[5], design_array[6], design_array[7]
+    
+    logM_h = np.log(M_h)
+    phi = phi_fun(logM_h, logM_cut, sigma)
+    Phi = Phi_fun(logM_h, logM_cut, sigma, gamma)
+    A = A_fun(p_max, Q, phi, Phi)
+    return 2.*A*phi*Phi + 0.5/Q*(1 + special.erf((logM_h-logM_cut)*100))
+
+@njit(fastmath=True)
+def n_sat_ELG(M_h, design_array):
+    """
+    HOD function for ELG satellites taken from arXiv:1910.05095.
+    """
+    p_max, Q, logM_cut, kappa, sigma, logM1, alpha, gamma = design_array[0], design_array[1], design_array[2], design_array[3], design_array[4], design_array[5], design_array[6], design_array[7]
+
+    M_cut = 10.**logM_cut
+    M_1 = 10.**logM1
+    return ((M_h-kappa*M_cut)/M_1)**alpha
+
+#@njit(fastmath=True)
+def phi_fun(logM_h, logM_cut, sigma):
+    """
+    Aiding function for N_cen_ELG_v1().
+    """
+    phi = Gaussian_fun(logM_h, logM_cut, sigma)
+    return phi
+
+#@njit(fastmath=True)
+def Phi_fun(logM_h, logM_cut, sigma, gamma):
+    """
+    Aiding function for N_cen_ELG_v1().
+    """
+    x = gamma*(logM_h-logM_cut)/sigma
+    Phi = 0.5*(1 + special.erf(x/np.sqrt(2)))
+    return Phi
+
+#@njit(fastmath=True)
+def A_fun(p_max, Q, phi, Phi):
+    """ 
+    Aiding function for N_cen_ELG_v1().
+    """
+    A = (p_max-1./Q)
+    return A
+
+#@njit(fastmath=True)
+def Gaussian_fun(x, mean, sigma):
+    """                                                                                            
+    Gaussian function with centered at `mean' with standard deviation `sigma'.                   
+    """
+    return 0.3989422804014327/sigma*np.exp(-(x - mean)**2/2/sigma**2)
+
+
+        
 
 @jit(nopython = True)
 def n_cen(M_in, design_array, m_cutoff = 4e12): 
@@ -46,11 +106,14 @@ def n_cen(M_in, design_array, m_cutoff = 4e12):
     """
     if M_in < m_cutoff:
         return 0
+
+    
     M_cut, M1, sigma, alpha, kappa = \
     design_array[0], design_array[1], design_array[2], design_array[3], design_array[4]
 
     return 0.5*erfc(np.log(M_cut/M_in)/(2**.5*sigma))
 
+    
 @jit(nopython = True)
 def n_sat(M_in, design_array, m_cutoff = 4e12): 
     """
@@ -148,13 +211,16 @@ def gen_cent(halo_ids, halo_pos, halo_vels, halo_vrms, halo_mass, halo_zs, desig
     # TESTING
     #rng = np.random.RandomState(whatseed)
 
+    '''
     # parse out the hod parameters 
     M_cut, M1, sigma, alpha, kappa = \
     design_array[0], design_array[1], design_array[2], design_array[3], design_array[4]
 
     # form the probability array
     ps = 0.5*special.erfc(np.log(M_cut/halo_mass)/(2**.5*sigma))
-
+    '''
+    ps = n_cen_ELG(halo_mass, design_array)[:]
+    
     # generate a bunch of numbers for central occupation
     #r_cents = rng.random(len(ps))
     r_cents = np.random.random(len(ps))
@@ -165,7 +231,7 @@ def gen_cent(halo_ids, halo_pos, halo_vels, halo_vrms, halo_mass, halo_zs, desig
     vrms_los = halo_vrms/1.7320508076 # km/s
     #extra_vlos = rng.normal(loc = 0, scale = vrms_los)
     extra_vlos = np.random.normal(loc = 0, scale = vrms_los)# testing
-
+    
     # compile the centrals
     pos_cents = halo_pos[mask_cents]
     vel_cents = halo_vels[mask_cents]
@@ -249,8 +315,8 @@ def gen_sats(halo_ids, halo_pos, halo_vels, halo_mass, halo_pstart, halo_pnum, p
     #np.random.seed(whatseed + 14838492)TESTING
 
     # standard hod design
-    M_cut, M1, sigma, alpha, kappa = \
-    design_array[0], design_array[1], design_array[2], design_array[3], design_array[4]
+    #M_cut, M1, sigma, alpha, kappa = \
+    #design_array[0], design_array[1], design_array[2], design_array[3], design_array[4]
 
 
     # TODO: don't hardcode 9 in
@@ -278,7 +344,8 @@ def gen_sats(halo_ids, halo_pos, halo_vels, halo_mass, halo_pstart, halo_pnum, p
         # compute the expected number of satellites
         # TESTING
         #N_sat = n_sat(halo_mass[i], design_array, m_cutoff) * halo_multi[i]
-        N_sat = n_sat(halo_mass[i], design_array, m_cutoff)
+        #N_sat = n_sat(halo_mass[i], design_array, m_cutoff)
+        N_sat = n_sat_ELG(halo_mass[i], design_array)
 
         if N_sat == 0:
             continue
@@ -354,18 +421,21 @@ def gen_gals(directory, design, fcent, fsats, rsd, params, m_cutoff = 4e12, what
         Ignore halos smaller than this mass.
 
     """
-
+    # og
+    '''
     M_cut, M1, sigma, alpha, kappa = map(design.get, ('M_cut', 
                                                       'M1', 
                                                       'sigma', 
                                                       'alpha', 
                                                       'kappa'))
-
+    '''
+    
     # TESTING
-    #design_array = np.array([M_cut, M1, sigma, alpha, kappa])
     global design_array
-    design_array = np.array([M_cut, M1, sigma, alpha, kappa])
-
+    #og
+    #design_array = np.array([M_cut, M1, sigma, alpha, kappa])
+    design_array = np.array([design['p_max'], design['Q'], design['logM_cut'], design['kappa'], design['sigma'], design['logM1'], design['alpha'], design['gamma']])
+    
     # box size
     lbox = params['Lbox']
 
@@ -388,7 +458,7 @@ def gen_gals(directory, design, fcent, fsats, rsd, params, m_cutoff = 4e12, what
         #halo_pos = maskedhalos['x_L2com'] # halo positions, Mpc/h
         halo_pos = maskedhalos['pos_interp'][:]+lbox/2. # halo positions, Mpc/h
         #halo_vels = maskedhalos['v_L2com'] # halo velocities, km/s
-        halo_vels = maskedhalos['vel_interp'][:] # halo velocities, km/s
+        halo_vels = maskedhalos['vel_interp'][:]+0. # TESTING # halo velocities, km/s
         halo_vrms = maskedhalos['sigmav3d_L2com'] # halo velocity dispersions, km/s
         halo_mass = maskedhalos['N'][:]*params['Mpart'] # halo mass, Msun/h
         halo_zs = maskedhalos['redshift_interp'][:] # halo redshifts

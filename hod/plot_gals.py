@@ -2,7 +2,7 @@ import numpy as np
 import glob
 import os
 import matplotlib
-matplotlib.use('Agg')
+#matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 import numpy as np
@@ -11,18 +11,33 @@ import os
 import matplotlib.pyplot as plt
 
 # hod model number
-model_no = 2#1
+model_no = 3#3#2#1
 
-z_in = 0.800
-z_in = 0.576
+#z_in = 1.100
+#z_in = 1.026
+#z_in = 0.950
+#z_in = 0.878
+#z_in = 0.800
+z_in = 0.726
+#z_in = 0.651
+#z_in = 0.576
+#z_in = 0.500
+
+
+blah, bin_left, bin_cents, bin_width, dndz = np.loadtxt("nz_blanc.txt", delimiter=',', unpack=True)
+#bin_cents = .5*(bin_edges[1:]+bin_edges[:-1])
+print(bin_cents)
+octant = 41523./8.
+n_gal = dndz*octant
+arg = np.argmin(np.abs(bin_cents-z_in))
+print("expected number of galaxies = ",n_gal[arg])
+print("expected dndz = ",dndz[arg])
 
 # HOD directory on alan
 hod_dir = "/mnt/gosling1/boryanah/light_cone_catalog/AbacusSummit_base_c000_ph006/HOD/z%.3f/model_%d_rsd/"%(z_in,model_no)
 
 sats_fns = sorted(glob.glob(hod_dir+"*sats*"))
 cent_fns = sorted(glob.glob(hod_dir+"*cent*"))
-
-print(len(cent_fns),len(sats_fns))
 
 def load_gals(fns,dim):
 
@@ -37,12 +52,26 @@ def load_gals(fns,dim):
 
 sats_arr = load_gals(sats_fns,dim=9)
 cent_arr = load_gals(cent_fns,dim=9)
+n_gals = sats_arr.shape[0]+cent_arr.shape[0]
+print("number of gals in bin = ",n_gals)
 
 # first three columns of file are positions, next are velocities, then halo index and finally halo mass
 sats_pos = sats_arr[:,0:3]
 cent_pos = cent_arr[:,0:3]
 sats_mass = sats_arr[:,-1]
 cent_mass = cent_arr[:,-1]
+
+dist = np.sqrt(np.sum((cent_pos - np.array([10, 10, 10]))**2, axis=1))
+dist_min = dist[dist > 1500].min()
+dist_max = dist[dist < 2000].max()
+print("median, min, max, diff = ",np.median(dist), dist_min, dist_max, dist_max-dist_min)
+
+vol_diff = 4./3*np.pi*(dist_max**3-dist_min**3)/8.
+n = n_gals/vol_diff
+print("number density of sample = ",n)
+n = n_gal[arg]/vol_diff
+print("number density goal = ",n)
+
 
 print(sats_pos.shape)
 print(cent_pos.shape)
@@ -52,7 +81,7 @@ print(cent_pos.max())
 print(sats_pos.min())
 print(sats_pos.max())
 
-x_min = 0
+x_min = 200
 x_max = x_min+40.
 i = 1
 j = 2
