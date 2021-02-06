@@ -39,6 +39,13 @@ def load_mt_npout(halo_mt_fn):
     f.close()
     return mt_npout
 
+def load_mt_origin(halo_mt_fn):
+    # load mtree catalog
+    print("load halo mtree file = ",halo_mt_fn)
+    f = asdf.open(halo_mt_fn, lazy_load=True, copy_arrays=True)
+    mt_origin = f['data']['origin'][:]
+    f.close()
+    return mt_origin
 
 @jit(nopython = True)
 def reindex_pid(pid,npstart,npout):

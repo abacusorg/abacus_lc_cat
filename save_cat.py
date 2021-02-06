@@ -31,17 +31,17 @@ from tools.merger import simple_load, get_halos_per_slab, get_zs_from_headers, g
 
 # these are probably just for testing; should be removed for production
 DEFAULTS = {}
-DEFAULTS['sim_name'] = "AbacusSummit_highbase_c021_ph000"
+#DEFAULTS['sim_name'] = "AbacusSummit_highbase_c021_ph000"
 #DEFAULTS['sim_name'] = "AbacusSummit_highbase_c000_ph100"
-#DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
+DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
 #DEFAULTS['compaso_parent'] = "/mnt/gosling2/bigsims")
 DEFAULTS['compaso_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus"
 #DEFAULTS['catalog_parent'] = "/mnt/gosling1/boryanah/light_cone_catalog/"
 DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
 #DEFAULTS['merger_parent'] = "/mnt/gosling2/bigsims/merger"
 DEFAULTS['merger_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus/merger"
-DEFAULTS['z_start'] = 0.5
-DEFAULTS['z_stop'] = 0.8
+DEFAULTS['z_start'] = 0.350
+DEFAULTS['z_stop'] = 1.625
 CONSTANTS = {'c': 299792.458}  # km/s, speed of light
 
 def extract_redshift(fn):
@@ -71,10 +71,7 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
 
     # directory where the CompaSO halo catalogs are saved
     cat_dir = compaso_parent / sim_name / "halos"
-
-    # fields to extract from the CompaSO catalogs
-    fields_cat = ['id','npstartA','npoutA','N','x_L2com','v_L2com','sigmav3d_L2com']
-
+    
     # obtain the redshifts of the CompaSO catalogs
     redshifts = glob.glob(os.path.join(cat_dir,"z*"))
     zs_cat = [extract_redshift(redshifts[i]) for i in range(len(redshifts))]
@@ -111,6 +108,13 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
     zs_all = np.load(Path("data_headers") / sim_name / "redshifts.npy")
     chis_all = np.load(Path("data_headers") / sim_name / "coord_dist.npy")
     zs_all[-1] = float("%.1f" % zs_all[-1])  # LHG: I guess this is trying to match up to some filename or something?
+
+    # fields to extract from the CompaSO catalogs
+    with asdf.open(str(cat_dir / ("z%.3f"%zs_cat[0]) / 'halo_info' / 'halo_info_000.asdf')) as f:
+        print(f.keys())
+        fields_cat = f['data'].keys()
+    # just for testing; remove for final version
+    fields_cat = ['id','npstartA','npoutA','N','x_L2com','v_L2com','sigmav3d_L2com']
 
     # get functions relating chi and z
     chi_of_z = interp1d(zs_all,chis_all)
@@ -152,7 +156,8 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
             {'HaloIndex':np.zeros(N_lc, dtype=np.int64),
              'InterpolatedVelocity': np.zeros(N_lc, dtype=(np.float32,3)),
              'InterpolatedPosition': np.zeros(N_lc, dtype=(np.float32,3)),
-             'InterpolatedComoving': np.zeros(N_lc, dtype=np.float32)
+             'InterpolatedComoving': np.zeros(N_lc, dtype=np.float32),
+             'LightConeOrigin': np.zeros(N_lc, dtype=np.int8)
             }
         )
         
@@ -186,7 +191,11 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
                 
                 # translate information from this file to the complete array
                 for key in Merger_lc.keys():
-                    Merger_lc[key][start:start+num] = merger_lc[key][:]
+                    # adding information about which lightcone the halo belongs to
+                    if key == 'LightConeOrigin':
+                        Merger_lc[key][start:start+num] = np.repeat(o, num).astype(np.int8)
+                    else:
+                        Merger_lc[key][start:start+num] = merger_lc[key][:]
                 
                 # add halos in this file
                 start += num
@@ -202,6 +211,7 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
         pos_interp_lc = Merger_lc['InterpolatedPosition'][:]
         vel_interp_lc = Merger_lc['InterpolatedVelocity'][:]
         chi_interp_lc = Merger_lc['InterpolatedComoving'][:]
+        origin_lc = Merger_lc['LightConeOrigin'][:]
         del Merger_lc
 
         # unpack halo indices
@@ -268,8 +278,9 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
         halo_table['pos_interp'] = pos_interp_lc
         halo_table['vel_interp'] = vel_interp_lc
         halo_table['redshift_interp'] = z_of_chi(chi_interp_lc)
+        halo_table['origin'] = origin_lc
         
-        del halo_ind_lc, pos_interp_lc, vel_interp_lc, not_interp, chi_interp_lc
+        del halo_ind_lc, pos_interp_lc, vel_interp_lc, not_interp, chi_interp_lc, origin_lc
         
         # save to files
         save_asdf(halo_table, "halo_info_lc", header, cat_lc_dir / ("z%4.3f"%z_mt))

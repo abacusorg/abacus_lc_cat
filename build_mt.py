@@ -33,15 +33,15 @@ from tools.compute_dist import dist, wrapping
 
 # these are probably just for testing; should be removed for production
 DEFAULTS = {}
-DEFAULTS['sim_name'] = "AbacusSummit_highbase_c021_ph000"
+#DEFAULTS['sim_name'] = "AbacusSummit_highbase_c021_ph000"
 #DEFAULTS['sim_name'] = "AbacusSummit_highbase_c000_ph100"
-#DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
+DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
 #DEFAULTS['merger_parent'] = "/mnt/gosling2/bigsims/merger"
 DEFAULTS['merger_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus/merger"
 #DEFAULTS['catalog_parent'] = "/mnt/gosling1/boryanah/light_cone_catalog/"
 DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
-DEFAULTS['z_start'] = 0.5
-DEFAULTS['z_stop'] = 0.8
+DEFAULTS['z_start'] = 0.35
+DEFAULTS['z_stop'] = 1.625
 CONSTANTS = {'c': 299792.458}  # km/s, speed of light
 
 def correct_inds(halo_ids, N_halos_slabs, slabs, inds_fn):
@@ -210,6 +210,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
         os.makedirs(Path("data_mt") / sim_name, exist_ok=True)
         np.save(Path("data_mt") / sim_name / "zs_mt.npy", zs_mt)
     zs_mt = np.load(Path("data_mt") / sim_name / "zs_mt.npy")
+    quit()
 
     # number of chunks
     n_chunks = len(list(merger_dir.glob("associations_z%4.3f.*.asdf"%zs_mt[0])))
