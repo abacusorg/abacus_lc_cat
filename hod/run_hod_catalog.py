@@ -18,6 +18,7 @@ sim_name = 'AbacusSummit_base_c000_ph006'
 
 # location where light cones are saved
 cat_lc_dir = "/mnt/gosling1/boryanah/light_cone_catalog/"+sim_name+"/halos_light_cones/"
+#cat_lc_dir = "/global/cscratch1/sd/boryanah/light_cone_catalog/"+sim_name+"/halos_light_cones/"
 
 def extract_redshift(fn):
     red = float(fn.split('z')[-1][:5])

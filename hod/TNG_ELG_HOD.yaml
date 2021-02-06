@@ -1,0 +1,39 @@
+z0:
+    z:
+        0.8
+    ELG_params:
+        p_max: 0.18
+        Q: 100.
+        logM_cut: 11.8
+        kappa: 1.8
+        sigma: 0.58
+        logM1: 13.73
+        alpha: 0.7
+        gamma: 6.12
+
+
+z1:
+    z:
+        1.1
+    ELG_params:
+        p_max: 0.13
+        Q: 100.
+        logM_cut: 12.0
+        kappa: 1.65
+        sigma: 0.58
+        logM1: 13.73
+        alpha: 0.7
+        gamma: 5.52
+
+z2:
+    z:
+        1.4
+    ELG_params:
+        p_max: 0.1
+        Q: 100.
+        logM_cut: 12.2
+        kappa: 1.5
+        sigma: 0.58
+        logM1: 13.73
+        alpha: 0.7
+        gamma: 5.22
