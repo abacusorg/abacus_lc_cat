@@ -21,14 +21,15 @@ from tools.InputFile import InputFile
 DEFAULTS = {}
 #DEFAULTS['sim_name'] = "AbacusSummit_highbase_c021_ph000"
 #DEFAULTS['sim_name'] = "AbacusSummit_highbase_c000_ph100"
-DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
+#DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
+DEFAULTS['sim_name'] = "AbacusSummit_huge_c000_ph201"
 #DEFAULTS['light_cone_parent'] = "/mnt/gosling2/bigsims/"
 DEFAULTS['light_cone_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus"
 #DEFAULTS['catalog_parent'] = "/mnt/gosling1/boryanah/light_cone_catalog/"
 DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
 #DEFAULTS['merger_parent'] = "/mnt/gosling2/bigsims/merger/"
 DEFAULTS['merger_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus/merger"
-DEFAULTS['z_lowest'] = 0.3
+DEFAULTS['z_lowest'] = 0.8
 DEFAULTS['z_highest'] = 1.1
 
 # return the mt catalog names straddling the given redshift
@@ -126,7 +127,8 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
     for i in range(len(lc_pid_fns)):
         step_fns[i] = extract_steps(lc_pid_fns[i])
 
-
+    # directory where we save the current state if we want to resume
+    os.makedirs(cat_lc_dir / "tmp", exist_ok=True)
     if resume:
         # check if resuming from an old state
         infile = InputFile(cat_lc_dir / "tmp" / "match.log")
@@ -134,7 +136,8 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
         assert (np.abs(z_last-z_highest) < 1.0e-6), "Your recorded state is not for the currently requested redshift, can't resume from old. Last recorded state is z = %.3f"%z_last
     else:
         z_last = -1
-        os.unlink(str(cat_lc_dir / "tmp" / "match.log"))
+        if os.path.exists(cat_lc_dir / "tmp" / "match.log"):
+            os.unlink(cat_lc_dir / "tmp" / "match.log")
         
     # initialize previously loaded mt file name
     currently_loaded_zs = []

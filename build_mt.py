@@ -34,13 +34,14 @@ from tools.compute_dist import dist, wrapping
 # these are probably just for testing; should be removed for production
 DEFAULTS = {}
 #DEFAULTS['sim_name'] = "AbacusSummit_highbase_c021_ph000"
-DEFAULTS['sim_name'] = "AbacusSummit_highbase_c000_ph100"
+#DEFAULTS['sim_name'] = "AbacusSummit_highbase_c000_ph100"
 #DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
-DEFAULTS['merger_parent'] = "/mnt/gosling2/bigsims/merger"
-#DEFAULTS['merger_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus/merger"
-DEFAULTS['catalog_parent'] = "/mnt/gosling1/boryanah/light_cone_catalog/"
-#DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
-DEFAULTS['z_start'] = 0.3
+DEFAULTS['sim_name'] = "AbacusSummit_huge_c000_ph201"
+#DEFAULTS['merger_parent'] = "/mnt/gosling2/bigsims/merger"
+DEFAULTS['merger_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus/merger"
+#DEFAULTS['catalog_parent'] = "/mnt/gosling1/boryanah/light_cone_catalog/"
+DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
+DEFAULTS['z_start'] = 0.8
 DEFAULTS['z_stop'] = 1.1#1.625
 DEFAULTS['superslab_start'] = 0
 CONSTANTS = {'c': 299792.458}  # km/s, speed of light
@@ -190,7 +191,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, superslab_sta
     # all redshifts, steps and comoving distances of light cones files; high z to low z
     # remove presaving after testing done (or make sure presaved can be matched with simulation)
     if not os.path.exists(Path("data_headers") / sim_name / "coord_dist.npy") or not os.path.exists(Path("data_headers") / sim_name / "redshifts.npy"):
-        zs_all, steps, chis_all = get_lc_info("all_headers")
+        zs_all, steps_all, chis_all = get_lc_info(Path("all_headers") / sim_name)
         os.makedirs(Path("data_headers") / sim_name, exist_ok=True)
         np.save(Path("data_headers") / sim_name / "redshifts.npy", zs_all)
         np.save(Path("data_headers") / sim_name / "steps.npy", steps_all)

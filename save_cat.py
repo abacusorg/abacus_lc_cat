@@ -33,14 +33,15 @@ from tools.merger import simple_load, get_halos_per_slab, get_zs_from_headers, g
 DEFAULTS = {}
 #DEFAULTS['sim_name'] = "AbacusSummit_highbase_c021_ph000"
 #DEFAULTS['sim_name'] = "AbacusSummit_highbase_c000_ph100"
-DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
-DEFAULTS['compaso_parent'] = "/mnt/gosling2/bigsims"
-#DEFAULTS['compaso_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus"
-DEFAULTS['catalog_parent'] = "/mnt/gosling1/boryanah/light_cone_catalog/"
-#DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
-DEFAULTS['merger_parent'] = "/mnt/gosling2/bigsims/merger"
-#DEFAULTS['merger_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus/merger"
-DEFAULTS['z_start'] = 0.3#0.350
+#DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
+DEFAULTS['sim_name'] = "AbacusSummit_huge_c000_ph201"
+#DEFAULTS['compaso_parent'] = "/mnt/gosling2/bigsims"
+DEFAULTS['compaso_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus"
+#DEFAULTS['catalog_parent'] = "/mnt/gosling1/boryanah/light_cone_catalog/"
+DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
+#DEFAULTS['merger_parent'] = "/mnt/gosling2/bigsims/merger"
+DEFAULTS['merger_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus/merger"
+DEFAULTS['z_start'] = 0.8#0.350
 DEFAULTS['z_stop'] = 1.1#1.625
 CONSTANTS = {'c': 299792.458}  # km/s, speed of light
 
@@ -151,7 +152,8 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
         # total number of halos in this light cone redshift
         N_lc = np.sum(N_halo_slabs_lc)
         print("total number of lc halos = ", N_lc)
-
+        if N_lc == 0: continue
+        
         Merger_lc = Table(
             {'HaloIndex':np.zeros(N_lc, dtype=np.int64),
              'InterpolatedVelocity': np.zeros(N_lc, dtype=(np.float32,3)),
@@ -213,7 +215,7 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
 
         # unpack halo indices
         halo_ind_lc = correct_all_inds(halo_ind_lc, N_halo_slabs, slabs, n_superslabs)
-            
+        
         # catalog directory
         catdir = str(cat_dir / ("z%.3f"%z_cat))
 
@@ -271,7 +273,6 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
         # isolate halos that did not have interpolation and get the velocity from the halo info files
         not_interp = (np.sum(np.abs(vel_interp_lc),axis=1) - 0.) < 1.e-6
         vel_interp_lc[not_interp] = halo_table['v_L2com'][not_interp]
-
         print("percentage not interpolated = ", 100.*np.sum(not_interp)/len(not_interp))
                 
         # append new fields
