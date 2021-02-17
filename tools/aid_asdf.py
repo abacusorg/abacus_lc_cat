@@ -73,6 +73,22 @@ def reindex_pid_pos(pid,pos,npstart,npout):
             
     return pid_new, pos_new, npstart_new, npout_new
 
+@jit(nopython = True)
+def reindex_pid_pos_vel(pid,pos,vel,npstart,npout):
+    npstart_new = np.zeros(len(npout),dtype=np.int64)
+    npstart_new[1:] = np.cumsum(npout)[:-1]
+    npout_new = npout
+    pid_new = np.zeros(np.sum(npout_new),dtype=pid.dtype)
+    pos_new = np.zeros((np.sum(npout_new),3),dtype=pos.dtype)
+    vel_new = np.zeros((np.sum(npout_new),3),dtype=vel.dtype)
+    
+    for j in range(len(npstart)):
+        pid_new[npstart_new[j]:npstart_new[j]+npout_new[j]] = pid[npstart[j]:npstart[j]+npout[j]]
+        pos_new[npstart_new[j]:npstart_new[j]+npout_new[j]] = pos[npstart[j]:npstart[j]+npout[j]]
+        vel_new[npstart_new[j]:npstart_new[j]+npout_new[j]] = vel[npstart[j]:npstart[j]+npout[j]]
+            
+    return pid_new, pos_new, vel_new, npstart_new, npout_new
+
 
 # save light cone catalog
 def save_asdf(table,filename,header,cat_lc_dir):

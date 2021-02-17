@@ -15,6 +15,7 @@ from bitpacked import unpack_rvint, unpack_pids
 from tools.merger import get_zs_from_headers, get_one_header
 from tools.read_headers import get_lc_info
 from tools.match_searchsorted import match, match_halo_pids_to_lc_rvint
+from tools.InputFile import InputFile
 
 # these are probably just for testing; should be removed for production
 DEFAULTS = {}
@@ -27,8 +28,8 @@ DEFAULTS['light_cone_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacu
 DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
 #DEFAULTS['merger_parent'] = "/mnt/gosling2/bigsims/merger/"
 DEFAULTS['merger_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus/merger"
-DEFAULTS['z_lowest'] = 0.350
-DEFAULTS['z_highest'] = 1.4
+DEFAULTS['z_lowest'] = 0.3
+DEFAULTS['z_highest'] = 1.1
 
 # return the mt catalog names straddling the given redshift
 def get_mt_fns(z_th, zs_mt, chis_mt, cat_lc_dir):
@@ -56,7 +57,7 @@ def extract_steps(fn):
     step = np.int(split_fn.split('.asdf')[0])
     return step
 
-def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merger_parent):
+def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merger_parent, resume=False):
     light_cone_parent = Path(light_cone_parent)
     catalog_parent = Path(catalog_parent)
     merger_parent = Path(merger_parent)
@@ -125,6 +126,16 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
     for i in range(len(lc_pid_fns)):
         step_fns[i] = extract_steps(lc_pid_fns[i])
 
+
+    if resume:
+        # check if resuming from an old state
+        infile = InputFile(cat_lc_dir / "tmp" / "match.log")
+        z_last = infile.z_last
+        assert (np.abs(z_last-z_highest) < 1.0e-6), "Your recorded state is not for the currently requested redshift, can't resume from old. Last recorded state is z = %.3f"%z_last
+    else:
+        z_last = -1
+        os.unlink(str(cat_lc_dir / "tmp" / "match.log"))
+        
     # initialize previously loaded mt file name
     currently_loaded_zs = []
     currently_loaded_headers = []
@@ -150,7 +161,7 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
         mt_chi_mean = np.mean(mt_chis)
 
         # how many shells are we including on both sides, including mid point (total of 2j+1)
-        buffer_no = 2
+        buffer_no = 1#2 TESTING is 1 enough?
 
         # is this the redshift that's closest to the bridge between two redshifts 
         mid_bool = (np.argmin(np.abs(mt_chi_mean-chis_all)) <= j+buffer_no) & (np.argmin(np.abs(mt_chi_mean-chis_all)) >= j-buffer_no)
@@ -166,13 +177,19 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
             # check if catalog already loaded
             if mt_zs[i] in currently_loaded_zs: print("skipped loading catalog ",mt_zs[i]); continue
 
-            # discard the old redshift catalog and record its data
+            # discard the old redshift catalog and record its data (equals because we are just about to load the third one)
             if len(currently_loaded_zs) >= 2:
 
-                # save the information about that redshift
-                save_asdf(currently_loaded_tables[0],"pid_rv_lc",currently_loaded_headers[0],cat_lc_dir / ("z%4.3f"%currently_loaded_zs[0]))
-                print("saved catalog = ",currently_loaded_zs[0])
+                if resume and np.abs(currently_loaded_zs[0]-z_last) < 1.e-6:
+                    print("This redshift (z = %.3f) has already been recorded, skipping"%z_last)
+                else:
+                    # save the information about that redshift
+                    save_asdf(currently_loaded_tables[0], "pid_rv_lc", currently_loaded_headers[0], cat_lc_dir / ("z%4.3f"%currently_loaded_zs[0]))
+                    print("saved catalog = ", currently_loaded_zs[0])
 
+                    with open(cat_lc_dir / "tmp" / "match.log", "a") as f:
+                        f.writelines(["# Last saved redshift: \n", "z_last = %.8f \n"%currently_loaded_zs[0]])
+                
                 # discard it from currently loaded
                 currently_loaded_zs = currently_loaded_zs[1:]
                 currently_loaded_headers = currently_loaded_headers[1:]
@@ -291,6 +308,9 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
         save_asdf(currently_loaded_tables[0],"pid_rv_lc",currently_loaded_headers[0],cat_lc_dir / ("z%4.3f"%currently_loaded_zs[0]))
         print("saved catalog = ",currently_loaded_zs[0])
 
+        with open(cat_lc_dir / "tmp" / "match.log", "a") as f:
+            f.writelines(["# Last saved redshift: \n", "z_last = %.8f \n"%currently_loaded_zs[0]])
+        
         # discard it from currently loaded
         currently_loaded_zs = currently_loaded_zs[1:]
         currently_loaded_headers = currently_loaded_headers[1:]
@@ -311,6 +331,7 @@ if __name__ == '__main__':
     parser.add_argument('--light_cone_parent', help='Light cone output directory', default=(DEFAULTS['light_cone_parent']))
     parser.add_argument('--catalog_parent', help='Light cone catalog directory', default=(DEFAULTS['catalog_parent']))
     parser.add_argument('--merger_parent', help='Merger tree directory', default=(DEFAULTS['merger_parent']))
+    parser.add_argument('--resume', help='Resume the calculation from the checkpoint on disk', action='store_true')
     
     args = vars(parser.parse_args())
     main(**args)

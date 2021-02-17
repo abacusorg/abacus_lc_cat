@@ -19,8 +19,8 @@ from pathlib import Path
 import asdf
 import numpy as np
 from scipy.interpolate import interp1d
-import matplotlib
-matplotlib.use('Agg')
+#import matplotlib
+#matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import argparse
 from astropy.table import Table
@@ -34,14 +34,15 @@ from tools.compute_dist import dist, wrapping
 # these are probably just for testing; should be removed for production
 DEFAULTS = {}
 #DEFAULTS['sim_name'] = "AbacusSummit_highbase_c021_ph000"
-#DEFAULTS['sim_name'] = "AbacusSummit_highbase_c000_ph100"
-DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
-#DEFAULTS['merger_parent'] = "/mnt/gosling2/bigsims/merger"
-DEFAULTS['merger_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus/merger"
-#DEFAULTS['catalog_parent'] = "/mnt/gosling1/boryanah/light_cone_catalog/"
-DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
-DEFAULTS['z_start'] = 0.35
-DEFAULTS['z_stop'] = 1.625
+DEFAULTS['sim_name'] = "AbacusSummit_highbase_c000_ph100"
+#DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
+DEFAULTS['merger_parent'] = "/mnt/gosling2/bigsims/merger"
+#DEFAULTS['merger_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus/merger"
+DEFAULTS['catalog_parent'] = "/mnt/gosling1/boryanah/light_cone_catalog/"
+#DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
+DEFAULTS['z_start'] = 0.3
+DEFAULTS['z_stop'] = 1.1#1.625
+DEFAULTS['superslab_start'] = 0
 CONSTANTS = {'c': 299792.458}  # km/s, speed of light
 
 def correct_inds(halo_ids, N_halos_slabs, slabs, inds_fn):
@@ -50,7 +51,7 @@ def correct_inds(halo_ids, N_halos_slabs, slabs, inds_fn):
     corresponding n halos and slabs for its time epoch
     '''
 
-    # number of halos in the loaded chunks
+    # number of halos in the loaded superslabs
     N_halos_load = np.array([N_halos_slabs[i] for i in inds_fn])
     
     # unpack slab and index for each halo
@@ -113,9 +114,9 @@ def solve_crossing(r1, r2, pos1, pos2, chi1, chi2, Lbox, origin, extra=4.):
     v_avg = (pos2 - pos1) / (chi1 - chi2)
     pos_star = pos1 + v_avg * (chi1 - chi_star[:, None])
 
-    # enforce boundary conditions by periodic wrapping
-    pos_star[pos_star >= Lbox/2.] = pos_star[pos_star >= Lbox/2.] - Lbox
-    pos_star[pos_star < -Lbox/2.] = pos_star[pos_star < -Lbox/2.] + Lbox
+    # enforce boundary conditions by periodic wrapping -- Daniel said no (TESTING)
+    #pos_star[pos_star >= Lbox/2.] = pos_star[pos_star >= Lbox/2.] - Lbox
+    #pos_star[pos_star < -Lbox/2.] = pos_star[pos_star < -Lbox/2.] + Lbox
     
     # interpolated velocity [km/s]
     vel_star = v_avg * CONSTANTS['c']  # vel1+a_avg*(chi1-chi_star)
@@ -126,7 +127,7 @@ def solve_crossing(r1, r2, pos1, pos2, chi1, chi2, Lbox, origin, extra=4.):
     
     # mark True if closer to chi2 (this snapshot)
     bool_star = np.abs(chi1 - chi_star) > np.abs(chi2 - chi_star)
-
+    
     # condition to check whether halo in this light cone band
     assert np.all(((chi_star <= chi1+extra) & (chi_star > chi2-extra))), "Solution is out of bounds"
 
@@ -144,7 +145,7 @@ def offset_pos(pos,ind_origin,all_origins):
     pos += offset
     return pos
 
-def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False, plot=False):
+def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, superslab_start, resume=False, plot=False):
     '''
     Main function.
     The algorithm: for each merger tree epoch, for 
@@ -183,7 +184,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
 
     # directory where we save the current state if we want to resume
     os.makedirs(cat_lc_dir / "tmp", exist_ok=True)
-    with open(cat_lc_dir / "tmp" / "tmp.log", "a") as f:
+    with open(cat_lc_dir / "tmp" / "build.log", "a") as f:
         f.writelines(["# Starting light cone catalog construction in simulation %s \n"%sim_name])
     
     # all redshifts, steps and comoving distances of light cones files; high z to low z
@@ -210,35 +211,37 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
         os.makedirs(Path("data_mt") / sim_name, exist_ok=True)
         np.save(Path("data_mt") / sim_name / "zs_mt.npy", zs_mt)
     zs_mt = np.load(Path("data_mt") / sim_name / "zs_mt.npy")
-    quit()
 
-    # number of chunks
-    n_chunks = len(list(merger_dir.glob("associations_z%4.3f.*.asdf"%zs_mt[0])))
-    print("number of chunks = ",n_chunks)
+    # number of superslabs
+    n_superslabs = len(list(merger_dir.glob("associations_z%4.3f.*.asdf"%zs_mt[0])))
+    print("number of superslabs = ",n_superslabs)
 
     # starting and finishing redshift indices indices
     ind_start = np.argmin(np.abs(zs_mt - z_start))
     ind_stop = np.argmin(np.abs(zs_mt - z_stop))
 
+    # initial superslab from which we start building
+    first_ss = superslab_start 
+    
     if resume:
-        # if user wants to resume from previous state, create padded array for marking whether chunk has been loaded
-        resume_flags = np.ones((n_chunks, origins.shape[1]), dtype=bool)
+        # if user wants to resume from previous state, create padded array for marking whether superslab has been loaded
+        resume_flags = np.ones((n_superslabs, origins.shape[1]), dtype=bool)
         
         # previous redshift, distance between shells
-        infile = InputFile(cat_lc_dir / "tmp" / "tmp.log")
+        infile = InputFile(cat_lc_dir / "tmp" / "build.log")
         z_this_tmp = infile.z_prev
         delta_chi_old = infile.delta_chi
-        chunk = infile.super_slab
-        assert (np.abs(n_chunks-1 - chunk) < 1.0e-6), "Your recorded state did not complete all chunks, can't resume from old"
-        assert (np.abs(zs_mt[ind_start] - z_this_tmp) < 1.0e-6), "Your recorded state is not for the correct redshift, can't resume from old"
-        with open(cat_lc_dir / "tmp" / "tmp.log", "a") as f:
+        superslab = infile.super_slab
+        assert (np.abs(zs_mt[ind_start] - z_this_tmp) < 1.0e-6), "Your recorded state is not for the currently requested redshift, can't resume from old. Last recorded state is z = %.3f"%z_this_tmp
+        assert (np.abs((first_ss-1)%n_superslabs - superslab) < 1.0e-6), "Your recorded state is not for the currently requested superslab, can't resume from old. Last recorded state is superslab = %d"%superslab
+        with open(cat_lc_dir / "tmp" / "build.log", "a") as f:
             f.writelines(["# Resuming from redshift z = %4.3f \n"%z_this_tmp])
     else:
         # delete the exisiting temporary files
         tmp_files = list((cat_lc_dir / "tmp").glob("*"))
         for i in range(len(tmp_files)):
             os.unlink(str(tmp_files[i]))
-        resume_flags = np.zeros((n_chunks, origins.shape[0]), dtype=bool)
+        resume_flags = np.zeros((n_superslabs, origins.shape[0]), dtype=bool)
 
     # fields to extract from the merger trees
     fields_mt = ['HaloIndex','HaloMass','Position','MainProgenitor','Progenitors','NumProgenitors']
@@ -268,7 +271,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
         chi_prev = chi_of_z(z_prev)
         delta_chi = chi_prev - chi_this
         print("comoving distance between this and previous snapshot = ", delta_chi)
-
+        
         # read merger trees file names at this and previous snapshot from minified version 
         fns_this = merger_dir.glob(f'associations_z{z_this:4.3f}.*.asdf.minified')
         fns_prev = merger_dir.glob(f'associations_z{z_prev:4.3f}.*.asdf.minified')
@@ -291,7 +294,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
 
         # number of merger tree files
         print("number of files = ", len(fns_this), len(fns_prev))
-        assert n_chunks == len(fns_this) and n_chunks == len(fns_prev), "Incomplete merger tree files"
+        assert n_superslabs == len(fns_this) and n_superslabs == len(fns_prev), "Incomplete merger tree files"
         # reorder file names by super slab number
         fns_this = reorder_by_slab(fns_this, minified)
         fns_prev = reorder_by_slab(fns_prev, minified)
@@ -300,31 +303,28 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
         N_halos_slabs_this, slabs_this = get_halos_per_slab(fns_this, minified)
         N_halos_slabs_prev, slabs_prev = get_halos_per_slab(fns_prev, minified)
         
-        # maybe we want to support resuming from arbitrary superslab
-        first_ss = 0 
-
         # We're going to be loading slabs in a rolling fashion:
         # reading the "high" slab at the leading edge, discarding the trailing "low" slab
         # and moving the mid to low. But first we need to read all three to prime the queue
         mt_prev = {}  # indexed by slab num
-        mt_prev[(first_ss-1)%n_chunks] = get_mt_info(fns_prev[(first_ss-1)%n_chunks], fields=fields_mt, minified=minified)
+        mt_prev[(first_ss-1)%n_superslabs] = get_mt_info(fns_prev[(first_ss-1)%n_superslabs], fields=fields_mt, minified=minified)
         mt_prev[first_ss] = get_mt_info(fns_prev[first_ss], fields=fields_mt, minified=minified)
 
-        # loop over each chunk
-        for k in range(first_ss,n_chunks):
-            # starting and finishing superslab chunks
-            klow = (k-1)%n_chunks
-            khigh = (k+1)%n_chunks
+        # loop over each superslab
+        for k in range(first_ss,n_superslabs):
+            # starting and finishing superslab superslabs
+            klow = (k-1)%n_superslabs
+            khigh = (k+1)%n_superslabs
             
             # slide down by one
-            if (klow-1)%n_chunks in mt_prev:
-                del mt_prev[(klow-1)%n_chunks]
+            if (klow-1)%n_superslabs in mt_prev:
+                del mt_prev[(klow-1)%n_superslabs]
             mt_prev[khigh] = get_mt_info(fns_prev[khigh], fields_mt, minified)
             
-            # starting and finishing superslab chunks
+            # starting and finishing superslab superslabs
             inds_fn_this = [k]
             inds_fn_prev = np.array([klow,k,khigh],dtype=int)
-            print("chunks loaded in this and previous redshifts = ",inds_fn_this, inds_fn_prev)
+            print("superslabs loaded in this and previous redshifts = ",inds_fn_this, inds_fn_prev)
             
             # get merger tree data for this snapshot and for the previous one
             mt_data_this = get_mt_info(fns_this[k], fields_mt, minified)
@@ -341,9 +341,9 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
             Merger_prev = Table(cols, copy=False)
             offset = 0
             for key in mt_prev.keys():
-                size_chunk = len(mt_prev[key]['merger']['HaloIndex'])
-                Merger_prev[offset:offset+size_chunk] = mt_prev[key]['merger'][:]
-                offset += size_chunk
+                size_superslab = len(mt_prev[key]['merger']['HaloIndex'])
+                Merger_prev[offset:offset+size_superslab] = mt_prev[key]['merger'][:]
+                offset += size_superslab
                 
             # mask where no merger tree info is available (because we don'to need to solve for eta star for those)
             noinfo_this = Merger_this['MainProgenitor'] <= 0
@@ -387,10 +387,10 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                 
                 # merger tree data of main progenitor halos corresponding to the halos in current snapshot
                 Merger_prev_main_this = Merger_prev[Merger_this['MainProgenitor']].copy()
-                
+
                 # if eligible, can be selected for light cone redshift catalog;
                 if i != ind_start or resume_flags[k, o]:
-                    # dealing with the fact that these files may not exist for all origins and all chunks
+                    # dealing with the fact that these files may not exist for all origins and all superslabs
                     if os.path.exists(cat_lc_dir / "tmp" / ("eligibility_prev_z%4.3f_lc%d.%02d.npy"%(z_this, o, k))):
                         eligibility_this = np.load(cat_lc_dir / "tmp" / ("eligibility_prev_z%4.3f_lc%d.%02d.npy"%(z_this, o, k)))
                     else:
@@ -404,7 +404,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                 # mask for eligible halos for light cone origin with and without information
                 mask_noinfo_this = noinfo_this & eligibility_this
                 mask_info_this = info_this & eligibility_this
-
+                
                 # halos that have merger tree information
                 Merger_this_info = Merger_this[mask_info_this].copy()
                 Merger_prev_main_this_info = Merger_prev_main_this[mask_info_this]
@@ -419,10 +419,16 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                 del cond_1, cond_2
 
                 # for hals that have no merger tree information, we simply take their current position
-                mask_lc_this_noinfo = (
-                    (Merger_this_noinfo['ComovingDistance'] > chi_this - delta_chi_old / 2.0)
-                    & (Merger_this_noinfo['ComovingDistance'] <= chi_this + delta_chi / 2.0)
-                )
+                # og
+                cond_1 = (Merger_this_noinfo['ComovingDistance'] > chi_this - delta_chi_old / 2.0)
+                cond_2 = (Merger_this_noinfo['ComovingDistance'] <= chi_this + delta_chi / 2.0)
+                '''
+                # TESTING
+                cond_1 = (Merger_this_noinfo['ComovingDistance'] > chi_this)
+                cond_2 = (Merger_this_noinfo['ComovingDistance'] <= chi_this + delta_chi)
+                '''
+                mask_lc_this_noinfo = (cond_1 & cond_2)
+                del cond_1, cond_2
 
                 # spare the computer the effort and avert empty array errors
                 # TODO: perhaps revise, as sometimes we might have no halos in
@@ -441,8 +447,9 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                 Merger_prev_main_this_info_lc = Merger_prev_main_this_info[mask_lc_this_info]
 
                 if plot:
-                    x_min = -Lbox/2.+k*(Lbox/n_chunks)
-                    x_max = x_min+(Lbox/n_chunks)
+                    
+                    x_min = -Lbox/2.+k*(Lbox/n_superslabs)
+                    x_max = x_min+(Lbox/n_superslabs)
 
                     x = Merger_this_info_lc['Position'][:,0]
                     choice = (x > x_min) & (x < x_max)
@@ -456,6 +463,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                     plt.legend()
                     plt.axis('equal')
                     plt.savefig('this_%d_%d_%d.png'%(i,k,o))
+                    plt.close()
                     
                     x = Merger_prev_main_this_info_lc['Position'][:,0]
                     
@@ -479,7 +487,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                 Merger_this_info_lc.add_column('InterpolatedPosition',copy=False)
                 Merger_this_info_lc.add_column('InterpolatedVelocity',copy=False)
                 Merger_this_info_lc.add_column('InterpolatedComoving',copy=False)
-
+                
                 # get chi star where lc crosses halo trajectory; bool is False where closer to previous
                 (
                     Merger_this_info_lc['InterpolatedComoving'],
@@ -497,12 +505,13 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                     origin
                 )
 
+                
                 # number of objects in this light cone
                 N_this_star_lc = np.sum(bool_star_this_info_lc)
                 N_this_noinfo_lc = np.sum(mask_lc_this_noinfo)
 
                 if i != ind_start or resume_flags[k, o]:
-                    # check if we have information about this light cone origin, chunk and epoch
+                    # check if we have information about this light cone origin, superslab and epoch
                     if os.path.exists(cat_lc_dir / "tmp" / ("Merger_next_z%4.3f_lc%d.%02d.asdf"%(z_this,o,k))):
                         
                         # load leftover halos from previously loaded redshift
@@ -603,14 +612,15 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                 Merger_next['InterpolatedPosition'][:] = Merger_this_info_lc['InterpolatedPosition'][~bool_star_this_info_lc]
                 Merger_next['InterpolatedComoving'][:] = Merger_this_info_lc['InterpolatedComoving'][~bool_star_this_info_lc]
                 del Merger_this_info_lc, Merger_prev_main_this_info_lc
-                
+
                 if plot:
+
                     # select the halos in the light cones
                     pos_choice = Merger_lc['InterpolatedPosition']
 
                     # selecting thin slab
-                    pos_x_min = -Lbox/2.+k*(Lbox/n_chunks)
-                    pos_x_max = x_min+(Lbox/n_chunks)
+                    pos_x_min = -Lbox/2.+k*(Lbox/n_superslabs)
+                    pos_x_max = x_min+(Lbox/n_superslabs)
 
                     ijk = 0
                     choice = (pos_choice[:, ijk] >= pos_x_min) & (pos_choice[:, ijk] < pos_x_max)
@@ -640,7 +650,8 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                     plt.close()
                     
                 gc.collect()
-
+                
+                
                 # pack halo indices for the halos in Merger_next
                 offset = 0
                 for idx in inds_fn_prev:
@@ -649,8 +660,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                     Merger_next['HaloIndex'][choice_idx] = pack_inds(Merger_next['HaloIndex'][choice_idx]-offset, idx)
                     offset += N_halos_slabs_prev[idx]
                 
-                
-                # split the eligibility array over three files for the three chunks it's made up of
+                # split the eligibility array over three files for the three superslabs it's made up of
                 offset = 0
                 for idx in inds_fn_prev:
                     eligibility_prev_idx = eligibility_prev[offset:offset+N_halos_slabs_prev[idx]]
@@ -668,7 +678,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, resume=False,
                 save_asdf(Merger_next, ("Merger_next_z%4.3f_lc%d.%02d"%(z_prev, o, k)), header, cat_lc_dir / "tmp")
 
                 # save redshift of catalog that is next to load and difference in comoving between this and prev
-                with open(cat_lc_dir / "tmp" / "tmp.log", "a") as f:
+                with open(cat_lc_dir / "tmp" / "build.log", "a") as f:
                     f.writelines(["# Next iteration: \n", "z_prev = %.8f \n"%z_prev, "delta_chi = %.8f \n"%delta_chi, "light_cone = %d \n"%o, "super_slab = %d \n"%k])
                 
             del Merger_this, Merger_prev
@@ -691,6 +701,7 @@ if __name__ == '__main__':
     parser.add_argument('--z_stop', help='Final redshift (inclusive)', type=float, default=DEFAULTS['z_stop'])
     parser.add_argument('--merger_parent', help='Merger tree directory', default=(DEFAULTS['merger_parent']))
     parser.add_argument('--catalog_parent', help='Light cone catalog directory', default=(DEFAULTS['catalog_parent']))
+    parser.add_argument('--superslab_start', help='Initial superslab where we start building the trees', type=int, default=DEFAULTS['superslab_start'])
     parser.add_argument('--resume', help='Resume the calculation from the checkpoint on disk', action='store_true')
     parser.add_argument('--plot', help='Want to show plots', action='store_true')
     
