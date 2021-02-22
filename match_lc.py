@@ -3,6 +3,7 @@
 import glob
 import time
 import os
+import gc
 from pathlib import Path
 
 import numpy as np
@@ -133,7 +134,7 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
         # check if resuming from an old state
         infile = InputFile(cat_lc_dir / "tmp" / "match.log")
         z_last = infile.z_last
-        assert (np.abs(z_last-z_highest) < 1.0e-6), "Your recorded state is not for the currently requested redshift, can't resume from old. Last recorded state is z = %.3f"%z_last
+        assert (np.abs(z_last-z_highest) <= 6.0e-1), "Your recorded state is not for the currently requested redshift, can't resume from old. Last recorded state is z = %.3f"%z_last
     else:
         z_last = -1
         if os.path.exists(cat_lc_dir / "tmp" / "match.log"):
@@ -156,7 +157,7 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
 
         assert step_this == step, "You've messed up the counts"
         print("light cones step, redshift = ", step_this, z_this)
-
+        
         # get the two redshifts it's straddling and the mean chi
         mt_fns, mt_zs, mt_chis, halo_mt_fns = get_mt_fns(z_this, zs_mt, chis_mt, cat_lc_dir)
 
@@ -178,12 +179,12 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
         # load this and prev
         for i in range(len(mt_fns)):
             # check if catalog already loaded
-            if mt_zs[i] in currently_loaded_zs: print("skipped loading catalog ",mt_zs[i]); continue
+            if mt_zs[i] in currently_loaded_zs: print("skipped loading catalog ", mt_zs[i]); continue
 
             # discard the old redshift catalog and record its data (equals because we are just about to load the third one)
             if len(currently_loaded_zs) >= 2:
 
-                if resume and np.abs(currently_loaded_zs[0]-z_last) < 1.e-6:
+                if resume and np.abs(currently_loaded_zs[0] - z_last) < 1.e-6:
                     print("This redshift (z = %.3f) has already been recorded, skipping"%z_last)
                 else:
                     # save the information about that redshift
@@ -202,10 +203,13 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
                 currently_loaded_tables = currently_loaded_tables[1:]
 
             # load new merger tree catalog
-            mt_pid, header = load_mt_pid(mt_fns[i],Lbox,PPD)
+            mt_pid, header = load_mt_pid(mt_fns[i], Lbox, PPD)
             halo_mt_npout = load_mt_npout(halo_mt_fns[i])
             halo_mt_origin = load_mt_origin(halo_mt_fns[i])
             mt_origins = np.repeat(halo_mt_origin, halo_mt_npout)
+            del halo_mt_origin
+            # Remove for Lehman's
+            del halo_mt_npout
             
             # start the light cones table for this redshift
             lc_table_final = Table(
@@ -220,7 +224,8 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
             currently_loaded_zs.append(mt_zs[i])
             currently_loaded_headers.append(header)
             currently_loaded_pids.append(mt_pid)
-            currently_loaded_npouts.append(halo_mt_npout)
+            # Useful for Lehman's
+            #currently_loaded_npouts.append(halo_mt_npout)
             currently_loaded_origins.append(mt_origins)
             currently_loaded_tables.append(lc_table_final)
 
@@ -238,23 +243,24 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
             print("light cones file = ",lc_pid_fns[choice_fn])
 
             # load particles in light cone
-            lc_pid, lc_rv = load_lc_pid_rv(lc_pid_fns[choice_fn],lc_rv_fns[choice_fn],Lbox,PPD)
+            lc_pid, lc_rv = load_lc_pid_rv(lc_pid_fns[choice_fn], lc_rv_fns[choice_fn], Lbox, PPD)
             
             if 'LightCone1' in lc_pid_fns[choice_fn]:
-                offset_lc = np.array([0.,0.,Lbox])
+                offset_lc = np.array([0., 0., Lbox])
                 origin = 1
             elif 'LightCone2' in lc_pid_fns[choice_fn]:
-                offset_lc = np.array([0.,Lbox,0.])
+                offset_lc = np.array([0., Lbox, 0.])
                 origin = 2
             else:
-                offset_lc = np.array([0.,0.,0.])
+                offset_lc = np.array([0., 0., 0.])
                 origin = 0
             
             # loop over the one or two closest catalogs 
             for i in range(len(mt_fns)):
                 which_mt = np.where(mt_zs[i] == currently_loaded_zs)[0]
                 mt_pid = currently_loaded_pids[which_mt[0]]
-                halo_mt_npout = currently_loaded_npouts[which_mt[0]]
+                # Useful for Lehman's
+                #halo_mt_npout = currently_loaded_npouts[which_mt[0]]
                 mt_origins = currently_loaded_origins[which_mt[0]]
                 header = currently_loaded_headers[which_mt[0]]
                 lc_table_final = currently_loaded_tables[which_mt[0]]
@@ -271,6 +277,7 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
                 comm1 = inds_mt_pid[mt_in_lc > -1]
                 pid_mt_lc = mt_pid[comm1]
                 print("time = ", time.time()-t1)
+                del mt_in_lc, inds_mt_pid, i_sort_lc_pid
                 
                 # select the intersected positions
                 pos_mt_lc, vel_mt_lc = unpack_rvint(lc_rv[comm2], Lbox)
@@ -295,21 +302,22 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
                 pos_mt_lc += offset_lc
                 
                 # save the pid, position, velocity and redshift
-                print(comm1, pid_mt_lc)
-                print(lc_table_final)
-                print(lc_table_final.keys())
                 lc_table_final['pid'][comm1] = pid_mt_lc
                 lc_table_final['pos'][comm1] = pos_mt_lc
                 lc_table_final['vel'][comm1] = vel_mt_lc
                 lc_table_final['redshift'][comm1] = np.ones(len(pid_mt_lc))*z_this
-
-            print("-------------------")    
+                del pid_mt_lc, pos_mt_lc, vel_mt_lc
+                del comm1, comm2
+                
+            print("-------------------")
+            del lc_pid, lc_rv
+            gc.collect()
 
     # close the two that are currently open
     for i in range(len(currently_loaded_zs)):
         # save the information about that redshift
-        save_asdf(currently_loaded_tables[0],"pid_rv_lc",currently_loaded_headers[0],cat_lc_dir / ("z%4.3f"%currently_loaded_zs[0]))
-        print("saved catalog = ",currently_loaded_zs[0])
+        save_asdf(currently_loaded_tables[0], "pid_rv_lc", currently_loaded_headers[0], cat_lc_dir / ("z%4.3f"%currently_loaded_zs[0]))
+        print("saved catalog = ", currently_loaded_zs[0])
 
         with open(cat_lc_dir / "tmp" / "match.log", "a") as f:
             f.writelines(["# Last saved redshift: \n", "z_last = %.8f \n"%currently_loaded_zs[0]])

@@ -211,12 +211,11 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
                 
                 # translate information from this file to the complete array
                 for key in merger_lc.keys():
-                    # adding information about which lightcone the halo belongs to
-                    if key == 'LightConeOrigin':
-                        Merger_lc[key_dic[key][0]][start:start+num] = np.repeat(o, num).astype(np.int8)
-                    else:
-                        Merger_lc[key_dic[key][0]][start:start+num] = merger_lc[key][:]
-
+                    Merger_lc[key_dic[key][0]][start:start+num] = merger_lc[key][:]
+                    
+                # adding information about which lightcone the halo belongs to
+                Merger_lc['origin'][start:start+num] = np.repeat(o, num).astype(np.int8)
+                
                 # halo index and velocity
                 halo_ind_lc = Merger_lc['index_halo'][start:start+num]
                 halo_ind_lc = correct_all_inds(halo_ind_lc, N_halo_slabs, slabs, n_superslabs)
@@ -256,6 +255,11 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
                 del npstart, npout
                 del pid
 
+                # change stuff
+                Merger_lc['npstartA'][start:start+num] = npstart_new + count
+                Merger_lc['npoutA'][start:start+num] = npout_new + count
+                del npstart_new, npout_new
+                
                 # create particle array
                 # fast track
                 pid_table = Table({'pid': np.zeros(len(pid_new), pid_new.dtype)})
@@ -280,11 +284,6 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
                 del halo_table
 
                 print("origin, superslab", o, k)
-                
-                # change stuff
-                Merger_lc['npstartA'][start:start+num] = npstart_new
-                Merger_lc['npoutA'][start:start+num] = npout_new
-                del npstart_new, npout_new
                 
                 # add halos in this file
                 start += num
