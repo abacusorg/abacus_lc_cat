@@ -269,6 +269,8 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
                     # decided this is bad cause of the particle indexing or rather the halo indexing that uses num and then the total number of particles
                     #halo_table = halo_table[mask_ineligible]
                     halo_table['N'][mask_ineligible] = 0
+                    halo_table['npstartA'][mask_ineligible] = -999
+                    halo_table['npoutA'][mask_ineligible] = 0
                     print("percentage surviving halos after eligibility = ", 100.-np.sum(mask_ineligible)*100./len(mask_ineligible))
 
                     
