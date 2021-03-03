@@ -3,6 +3,7 @@ import os
 import glob
 import multiprocessing
 from multiprocessing import Pool
+import yaml
 from itertools import repeat
 
 # abacus readers
@@ -43,14 +44,14 @@ params['Nslab'] = 1 # only one because light cones
 params['Lbox'] = header['BoxSize'] # box size in Mpc/h
 params['Mpart'] = header['ParticleMassHMsun'] # Msun/h, mass of each particle 
 params['velz2kms'] = header['VelZSpace_to_kms']/params['Lbox']# B.H. check # H(z)/(1+z), km/s/Mpc
-params['n_cutoff'] = 40 # minimum number of particles
+params['n_cutoff'] = 0 # minimum number of particles
 params['m_cutoff'] = params['n_cutoff']*params['Mpart']
 params['seeds'] = seeds
 
 # user choices
 params['simname'] = sim_name
 params['want_pid'] = False
-params['rsd'] = True
+params['rsd'] = False
 params['verbose'] = False
 params['num_sims'] = len(redshifts) # do for how many redshifts
 
@@ -84,32 +85,24 @@ if __name__ == "__main__":
 
     # HOD parameters
     # median redshift of the sample
-    z_0 = 0.6#0.8
-    a_0 = 1./(1+z_0)
 
-    # base HOD parameters
-    '''
-    logM_cut = 12.27
-    logM1 = 13.30
-    sigma = 0.78
-    alpha = 1.09
-    kappa = 0.21
-    params['model_no'] = 2
-    '''
-    p_max = 0.24
-    Q = 100.
-    logM_cut = 11.8
-    kappa = 1.8
-    sigma = 0.58
-    logM1 = 13.73
-    alpha = 0.7
-    gamma = 6.12
-    params['model_no'] = 4
-    
-    # first derivative parameters
-    logM_cut_prime = 1.
-    logM1_prime = 1.
-    
+    # read params from yaml file
+    path2config = 'config/TNG_ELG_HOD.yaml'
+    config = yaml.load(open(path2config))
+    der_dic = {}
+    fid_dic = {}
+    zs = np.zeros(3)
+    pars = np.zeros(3)
+    for key in config['z0']['ELG_params'].keys():
+        for i in range(3):
+            zs[i] = config[f'z{i}']['z']
+            pars[i] = config[f'z{i}']['ELG_params'][key]
+            if i == 0:
+                fid_dic[key] = config[f'z{i}']['ELG_params'][key]
+                z_fid = config[f'z{i}']['z']
+        der_dic[key] = (pars[-1] - pars[0])/(zs[-1] - zs[0])
+    params['model_no'] = 5
+        
     newparams = []
     newdesigns = []
     for i in range(len(redshifts)):
@@ -122,42 +115,29 @@ if __name__ == "__main__":
         print("Files exist for z = ",redshift)
 
         # TESTING
-        if redshift > 1.1: continue
+        if redshift > 1.4: continue
         
         newparam = params.copy()
         newparam['subsample_directory'] = sim_slices[i]
         newparam['z'] = redshift
         newparam['datadir'] = "/mnt/gosling1/boryanah/light_cone_catalog/"+sim_name+"/HOD/z%.3f"%redshift # where to save output
         newparams.append(newparam)
-        
-        a = 1./(1+redshifts[i])
-        logM_cut_this = taylor_expand(logM_cut,logM_cut_prime,a,a_0)
-        logM1_this = taylor_expand(logM1,logM1_prime,a,a_0)
-        print("logM_cut, logM1 = %.3f %.3f"%(logM_cut_this,logM1_this))
 
-        newdesign = {'p_max': p_max,
-                     'Q': Q,
-                     'logM_cut': logM_cut_this,
-                     'kappa': kappa,
-                     'sigma': sigma,
-                     'logM1': logM1_this,
-                     'alpha': alpha,
-                     'gamma': gamma}
-        '''                                                           
-        newdesign = {'M_cut': 10.**logM_cut_this, 
-                     'M1': 10.**logM1_this,
-                     'sigma': sigma,
-                     'alpha': alpha,
-                     'kappa': kappa}
-        '''
+        # TESTING
+        if redshift <= 0.726:
+            newdesigns.append(fid_dic)
+            continue
         
+        newdesign = {}
+        for key in fid_dic.keys():
+            newdesign[key] = fid_dic[key] + der_dic[key]*(redshift - z_fid)        
         newdesigns.append(newdesign)
 
-    
+        print(newdesign.items())
+
     # generate one halo catalog
     #gen_gal_onesim_onehod(newdesign,newparam)
 
-    
     p = multiprocessing.Pool(40)
     p.starmap(gen_gal_onesim_onehod, zip(newdesigns,newparams))
     p.close()

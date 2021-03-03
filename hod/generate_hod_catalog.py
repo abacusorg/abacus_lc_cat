@@ -15,22 +15,10 @@ from math import erfc
 import asdf
 import h5py
 from scipy import special
+from scipy.stats import norm
 from glob import glob
 from numba import jit, njit
 import math
-
-#@njit(fastmath=True)
-def n_cen_ELG(M_h, design_array):
-    """
-    HOD function for ELG centrals taken from arXiv:1910.05095.
-    """
-    p_max, Q, logM_cut, kappa, sigma, logM1, alpha, gamma = design_array[0], design_array[1], design_array[2], design_array[3], design_array[4], design_array[5], design_array[6], design_array[7]
-    
-    logM_h = np.log(M_h)
-    phi = phi_fun(logM_h, logM_cut, sigma)
-    Phi = Phi_fun(logM_h, logM_cut, sigma, gamma)
-    A = A_fun(p_max, Q, phi, Phi)
-    return 2.*A*phi*Phi + 0.5/Q*(1 + special.erf((logM_h-logM_cut)*100))
 
 @njit(fastmath=True)
 def n_sat_ELG(M_h, design_array):
@@ -38,10 +26,73 @@ def n_sat_ELG(M_h, design_array):
     HOD function for ELG satellites taken from arXiv:1910.05095.
     """
     p_max, Q, logM_cut, kappa, sigma, logM1, alpha, gamma = design_array[0], design_array[1], design_array[2], design_array[3], design_array[4], design_array[5], design_array[6], design_array[7]
-
+    
     M_cut = 10.**logM_cut
+
+    if M_h < kappa*M_cut:
+        return 0
+    
     M_1 = 10.**logM1
-    return ((M_h-kappa*M_cut)/M_1)**alpha
+    N = ((M_h-kappa*M_cut)/M_1)**alpha
+    return N
+
+
+def n_cen_ELG(M_h, design_array):
+    """
+    HOD function for ELG centrals taken from arXiv:1910.05095.
+    """
+    p_max, Q, logM_cut, kappa, sigma, logM1, alpha, gamma = design_array[0], design_array[1], design_array[2], design_array[3], design_array[4], design_array[5], design_array[6], design_array[7]
+    
+    phi = phi_fun(M_h, 10.**logM_cut, sigma)
+    Phi = Phi_fun(M_h, 10.**logM_cut, sigma, gamma)
+    A = A_fun(p_max, Q, phi, Phi)
+    N = 2.*A*phi*Phi + 1./(2.*Q)*(1 + special.erf((np.log10(M_h)-logM_cut)/0.01))
+    return N
+
+def phi_fun(M_h, M_cut, sigma):
+    """
+    Aiding function for N_cen_ELG_v1().
+    """
+    phi = Gaussian_fun(np.log10(M_h),np.log10(M_cut), sigma)
+    return phi
+
+def Phi_fun(M_h, M_cut, sigma, gamma):
+    """
+    Aiding function for N_cen_ELG_v1().
+    """
+    x = gamma*(np.log10(M_h)-np.log10(M_cut))/sigma
+    Phi = 0.5*(1 + special.erf(x/np.sqrt(2)))
+    return Phi
+    
+def A_fun(p_max, Q, phi, Phi):
+    """
+    Aiding function for N_cen_ELG_v1().
+    """
+    A = (p_max-1./Q)/np.max(2.*phi*Phi)
+    return A
+    
+def Gaussian_fun(x, mean, sigma):
+    """
+    Gaussian function with centered at `mean' with standard deviation `sigma'.
+    """
+    return norm.pdf(x, loc=mean, scale=sigma)
+
+
+'''
+#@njit(fastmath=True)
+def n_cen_ELG(M_h, design_array):
+    """
+    HOD function for ELG centrals taken from arXiv:1910.05095.
+    """
+    p_max, Q, logM_cut, kappa, sigma, logM1, alpha, gamma = design_array[0], design_array[1], design_array[2], design_array[3], design_array[4], design_array[5], design_array[6], design_array[7]
+    
+    
+    logM_h = np.log(M_h)
+    phi = phi_fun(logM_h, logM_cut, sigma)
+    Phi = Phi_fun(logM_h, logM_cut, sigma, gamma)
+    A = A_fun(p_max, Q, phi, Phi)
+    N = 2.*A*phi*Phi + 0.5/Q*(1 + special.erf((logM_h-logM_cut)*100))
+    return N
 
 #@njit(fastmath=True)
 def phi_fun(logM_h, logM_cut, sigma):
@@ -74,12 +125,11 @@ def Gaussian_fun(x, mean, sigma):
     Gaussian function with centered at `mean' with standard deviation `sigma'.                   
     """
     return 0.3989422804014327/sigma*np.exp(-(x - mean)**2/2/sigma**2)
-
-
+'''
         
 
 @jit(nopython = True)
-def n_cen(M_in, design_array, m_cutoff = 4e12): 
+def n_cen(M_in, design_array, m_cutoff = 1e11): 
     """
     Computes the expected number of central galaxies given a halo mass and 
     the HOD design. 
@@ -106,7 +156,6 @@ def n_cen(M_in, design_array, m_cutoff = 4e12):
     """
     if M_in < m_cutoff:
         return 0
-
     
     M_cut, M1, sigma, alpha, kappa = \
     design_array[0], design_array[1], design_array[2], design_array[3], design_array[4]
@@ -115,7 +164,7 @@ def n_cen(M_in, design_array, m_cutoff = 4e12):
 
     
 @jit(nopython = True)
-def n_sat(M_in, design_array, m_cutoff = 4e12): 
+def n_sat(M_in, design_array, m_cutoff = 1e11): 
     """
     Computes the expected number of satellite galaxies given a halo mass and 
     the HOD design. 
@@ -152,7 +201,7 @@ def n_sat(M_in, design_array, m_cutoff = 4e12):
     return ((M_in - kappa*M_cut)/M1)**alpha*0.5*erfc(np.log(M_cut/M_in)/(2**.5*sigma))
 
 
-def gen_cent(halo_ids, halo_pos, halo_vels, halo_vrms, halo_mass, halo_zs, design_array, rsd, fcent, velz2kms, lbox, m_cutoff = 4e12, whatseed = 0):
+def gen_cent(halo_ids, halo_pos, halo_vels, halo_vrms, halo_mass, halo_zs, design_array, rsd, fcent, velz2kms, lbox, m_cutoff = 1e11, whatseed = 0):
     """
     Function that generates central galaxies and its position and velocity 
     given a halo catalog and HOD designs. The generated 
@@ -251,7 +300,7 @@ def gen_cent(halo_ids, halo_pos, halo_vels, halo_vrms, halo_mass, halo_zs, desig
 
 
 @jit(nopython = True)
-def gen_sats(halo_ids, halo_pos, halo_vels, halo_mass, halo_pstart, halo_pnum, part_pos, part_vel, part_z, rsd, velz2kms, lbox, m_cutoff = 4e12, whatseed = 0, want_pid = False):
+def gen_sats(halo_ids, halo_pos, halo_vels, halo_mass, halo_pstart, halo_pnum, part_pos, part_vel, part_z, part_pid, rsd, velz2kms, lbox, m_cutoff = 1e11, whatseed = 0):
     
     """
     Function that generates satellite galaxies and their positions and 
@@ -334,10 +383,19 @@ def gen_sats(halo_ids, halo_pos, halo_vels, halo_mass, halo_pstart, halo_pnum, p
             continue
 
         # extract the particle positions and vels
-        ss_pos = part_pos[start_ind: start_ind + numparts] # Mpc/h
-        ss_vels = part_vel[start_ind: start_ind + numparts] # km/s
-        ss_zs = part_z[start_ind: start_ind + numparts] # float
-
+        ss_pids = part_pid[start_ind: start_ind + numparts] # int
+        ss_vels = part_vel[start_ind: start_ind + numparts]
+        ss_pos = part_pos[start_ind: start_ind + numparts]
+        ss_zs = part_z[start_ind: start_ind + numparts]
+        missing_mask = ss_pids != 0
+        ss_pids = ss_pids[missing_mask]
+        ss_vels = ss_vels[missing_mask]
+        ss_pos = ss_pos[missing_mask]
+        ss_zs = ss_zs[missing_mask]
+        numparts = np.sum(missing_mask)
+        if numparts == 0:
+            continue
+        
         # generate a list of random numbers that will track each particle
         random_list = np.random.random(numparts)
 
@@ -368,10 +426,11 @@ def gen_sats(halo_ids, halo_pos, halo_vels, halo_mass, halo_pstart, halo_pnum, p
         # so a lot of the sat_pos are empty, in that case, just pass
         if len(sat_pos) == 0:
             continue
-
+        
         # rsd, modify the satellite positions by their velocities
         if rsd:
             sat_pos[:,2] = (sat_pos[:,2] + sat_vels[:,2]/velz2kms)# TESTING % lbox
+
 
         # output
         for j in range(len(sat_pos)):
@@ -389,7 +448,7 @@ def gen_sats(halo_ids, halo_pos, halo_vels, halo_mass, halo_pstart, halo_pnum, p
     return data_sats[1:]
 
 
-def gen_gals(directory, design, fcent, fsats, rsd, params, m_cutoff = 4e12, whatseed = 0, want_pid = False):
+def gen_gals(directory, design, fcent, fsats, rsd, params, m_cutoff = 1e11, whatseed = 0, want_pid = False):
     """
     Function that compiles halo catalog from directory and implements 
     HOD. 
@@ -421,14 +480,6 @@ def gen_gals(directory, design, fcent, fsats, rsd, params, m_cutoff = 4e12, what
         Ignore halos smaller than this mass.
 
     """
-    # og
-    '''
-    M_cut, M1, sigma, alpha, kappa = map(design.get, ('M_cut', 
-                                                      'M1', 
-                                                      'sigma', 
-                                                      'alpha', 
-                                                      'kappa'))
-    '''
     
     # TESTING
     global design_array
@@ -466,6 +517,7 @@ def gen_gals(directory, design, fcent, fsats, rsd, params, m_cutoff = 4e12, what
         halo_pnum = maskedhalos['npoutA'][:] # number of particles
         halo_multi = np.ones(len(halo_pnum))
         halo_submask = np.ones(len(halo_pnum),dtype=bool)
+        
         #halo_multi = maskedhalos['multi_halos'] # tuks no need 
         #halo_submask = maskedhalos['mask_subsample']  #tuks no need
 
@@ -478,17 +530,16 @@ def gen_gals(directory, design, fcent, fsats, rsd, params, m_cutoff = 4e12, what
         subsample = particles['data']
         part_pos = subsample['pos'][:]+lbox/2. # Mpc/h
         part_vel = subsample['vel'][:] # km/s
-        part_z = subsample['redshift'][:] # km/s
-        if want_pid: # TODO don't really need it
-            part_pid = subsample['pid'][:]
+        part_z = subsample['redshift'][:] 
+        part_pid = subsample['pid'][:]
         
         
         # for each halo, generate satellites and output to file        
         data_sats = gen_sats(halo_ids, halo_pos, 
                              halo_vels, halo_mass, halo_pstart, 
-                             halo_pnum, part_pos, part_vel, part_z,
+                             halo_pnum, part_pos, part_vel, part_z, part_pid,
                              rsd, velz2kms, lbox, m_cutoff = m_cutoff,
-                             whatseed = whatseed, want_pid = want_pid)
+                             whatseed = whatseed)
 
         
         data_sats.tofile(fsats)
