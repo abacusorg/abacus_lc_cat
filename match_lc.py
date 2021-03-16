@@ -11,7 +11,7 @@ from scipy.interpolate import interp1d
 import argparse
 from astropy.table import Table
 
-from tools.aid_asdf import save_asdf, load_mt_pid, load_mt_npout, load_lc_pid_rv, load_mt_origin
+from tools.aid_asdf import save_asdf, load_mt_pid, load_mt_pid_pos_vel, load_mt_npout, load_lc_pid_rv, load_mt_origin, reindex_pid_pos_vel
 from bitpacked import unpack_rvint, unpack_pids
 from tools.merger import get_zs_from_headers, get_one_header
 from tools.read_headers import get_lc_info
@@ -22,16 +22,16 @@ from tools.InputFile import InputFile
 DEFAULTS = {}
 #DEFAULTS['sim_name'] = "AbacusSummit_highbase_c021_ph000"
 #DEFAULTS['sim_name'] = "AbacusSummit_highbase_c000_ph100"
-#DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
-DEFAULTS['sim_name'] = "AbacusSummit_huge_c000_ph201"
+DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
+#DEFAULTS['sim_name'] = "AbacusSummit_huge_c000_ph201"
 #DEFAULTS['light_cone_parent'] = "/mnt/gosling2/bigsims/"
 DEFAULTS['light_cone_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus"
 #DEFAULTS['catalog_parent'] = "/mnt/gosling1/boryanah/light_cone_catalog/"
 DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
 #DEFAULTS['merger_parent'] = "/mnt/gosling2/bigsims/merger/"
 DEFAULTS['merger_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus/merger"
-DEFAULTS['z_lowest'] = 0.8
-DEFAULTS['z_highest'] = 1.1
+DEFAULTS['z_lowest'] = 0.350
+DEFAULTS['z_highest'] = 1.625
 
 # return the mt catalog names straddling the given redshift
 def get_mt_fns(z_th, zs_mt, chis_mt, cat_lc_dir):
@@ -59,7 +59,7 @@ def extract_steps(fn):
     step = np.int(split_fn.split('.asdf')[0])
     return step
 
-def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merger_parent, resume=False):
+def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merger_parent, resume=False, complete=False):
     light_cone_parent = Path(light_cone_parent)
     catalog_parent = Path(catalog_parent)
     merger_parent = Path(merger_parent)
@@ -280,7 +280,7 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
                 del mt_in_lc, inds_mt_pid, i_sort_lc_pid
                 
                 # select the intersected positions
-                pos_mt_lc, vel_mt_lc = unpack_rvint(lc_rv[comm2], Lbox)
+                pos_mt_lc, vel_mt_lc = unpack_rvint(lc_rv[comm2], boxsize=Lbox)
                 
                 # print percentage of matched pids
                 print("at z = %.3f, matched = "%mt_z, len(comm1)*100./(len(mt_pid)))
@@ -315,13 +315,39 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
 
     # close the two that are currently open
     for i in range(len(currently_loaded_zs)):
+        # if you want to complete, then
+        if complete and np.abs(chi_this-np.min(chis_all)) < 1.e-5 and np.abs(currently_loaded_zs[0] - 0.1) < 1.e-5:
+            # load the halo catalog halo_info_lc at z = 0.1
+            # load the interpolated distance for each halo
+            # if it is less than chi_this, take halo npout and npstart
+            # load the pid_lc so you can do the particle reindexing (can probably use the function in aid_asdf from save_cat) to get new pid, pos, vel
+            #pid,pos,vel,npstart,npout = reindex_pid_pos_vel(pid,pos,vel,npstart,npout)
+            #mt_pid, mt_pos, mt_vel, header = load_mt_pid_pos_vel(cat_lc_dir / ("z%.3f/pid_lc.asdf"%(currently_loaded_zs[0])), Lbox, PPD)
+            # can perhaps save in separate file for 0? and then concatenate in postprocessing
+            # save the pid, position, velocity and redshift
+            # outstanding: how to make sure not overwriting halos; how do you connect particles to halos? I would perhaps just create halo_info_complete and somehow get rid of the halos that are blah; also maybe do a quick check of the particles to see that there is no overlap?
+            '''
+            lc_table_final = Table(
+                {'pid': np.zeros(len(pid_new), dtype=pid_new.dtype),
+                 'pos': np.zeros(len(pid_new), dtype=(np.float32,3)),
+                 'vel': np.zeros(len(pid_new), dtype=(np.float32,3)),
+                 'redshift': np.zeros(len(pid_new), dtype=np.float32),
+                }
+            )
+            lc_table_final['pid'][comm1] = pid_mt_lc
+            lc_table_final['pos'] = pos_mt_lc
+            lc_table_final['vel'] = vel_mt_lc
+            lc_table_final['redshift'] = np.ones(len(pid_mt_lc))*z_this
+            save_asdf(lc_table_final, "pid_rv_complete", currently_loaded_headers[0], cat_lc_dir / ("z%4.3f"%currently_loaded_zs[0]))
+            '''
+
         # save the information about that redshift
         save_asdf(currently_loaded_tables[0], "pid_rv_lc", currently_loaded_headers[0], cat_lc_dir / ("z%4.3f"%currently_loaded_zs[0]))
         print("saved catalog = ", currently_loaded_zs[0])
 
         with open(cat_lc_dir / "tmp" / "match.log", "a") as f:
             f.writelines(["# Last saved redshift: \n", "z_last = %.8f \n"%currently_loaded_zs[0]])
-        
+            
         # discard it from currently loaded
         currently_loaded_zs = currently_loaded_zs[1:]
         currently_loaded_headers = currently_loaded_headers[1:]
@@ -343,6 +369,6 @@ if __name__ == '__main__':
     parser.add_argument('--catalog_parent', help='Light cone catalog directory', default=(DEFAULTS['catalog_parent']))
     parser.add_argument('--merger_parent', help='Merger tree directory', default=(DEFAULTS['merger_parent']))
     parser.add_argument('--resume', help='Resume the calculation from the checkpoint on disk', action='store_true')
-    
+    parser.add_argument('--complete', help='Save the particle information down to z = 0', action='store_true')
     args = vars(parser.parse_args())
     main(**args)

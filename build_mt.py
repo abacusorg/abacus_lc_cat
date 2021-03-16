@@ -35,14 +35,14 @@ from tools.compute_dist import dist, wrapping
 DEFAULTS = {}
 #DEFAULTS['sim_name'] = "AbacusSummit_highbase_c021_ph000"
 #DEFAULTS['sim_name'] = "AbacusSummit_highbase_c000_ph100"
-#DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
-DEFAULTS['sim_name'] = "AbacusSummit_huge_c000_ph201"
+DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
+#DEFAULTS['sim_name'] = "AbacusSummit_huge_c000_ph201"
 #DEFAULTS['merger_parent'] = "/mnt/gosling2/bigsims/merger"
 DEFAULTS['merger_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus/merger"
 #DEFAULTS['catalog_parent'] = "/mnt/gosling1/boryanah/light_cone_catalog/"
 DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
-DEFAULTS['z_start'] = 0.8
-DEFAULTS['z_stop'] = 1.1#1.625
+DEFAULTS['z_start'] = 0.35
+DEFAULTS['z_stop'] = 0.35#1.625
 DEFAULTS['superslab_start'] = 0
 CONSTANTS = {'c': 299792.458}  # km/s, speed of light
 
@@ -95,17 +95,22 @@ def get_mt_info(fn_load, fields, minified):
         
     return mt_data
 
-def solve_crossing(r1, r2, pos1, pos2, chi1, chi2, Lbox, origin, extra=4.):
+def solve_crossing(r1, r2, pos1, pos2, chi1, chi2, Lbox, origin, complete=False, extra=4.):
     '''
     Solve when the crossing of the light cones occurs and the
     interpolated position and velocity
     '''
 
+    if complete:
+        chi_low = 0.
+    else:
+        chi_low = chi2
+
     # periodic wrapping of the positions of the particles
-    r1, r2, pos1, pos2 = wrapping(r1, r2, pos1, pos2, chi1, chi2, Lbox, origin)
+    r1, r2, pos1, pos2 = wrapping(r1, r2, pos1, pos2, chi1, chi_low, Lbox, origin)
     
     # assert wrapping worked
-    assert np.all(((r2 <= chi1) & (r2 > chi2)) | ((r1 <= chi1) & (r1 > chi2))), "Wrapping didn't work"
+    assert np.all(((r2 <= chi1) & (r2 > chi_low)) | ((r1 <= chi1) & (r1 > chi_low))), "Wrapping didn't work"
     
     # solve for chi_star, where chi(z) = eta(z=0)-eta(z)
     # equation is r1+(chi1-chi)/(chi1-chi2)*(r2-r1) = chi, with solution:
@@ -130,7 +135,7 @@ def solve_crossing(r1, r2, pos1, pos2, chi1, chi2, Lbox, origin, extra=4.):
     bool_star = np.abs(chi1 - chi_star) > np.abs(chi2 - chi_star)
     
     # condition to check whether halo in this light cone band
-    assert np.all(((chi_star <= chi1+extra) & (chi_star > chi2-extra))), "Solution is out of bounds"
+    assert np.all(((chi_star <= chi1+extra) & (chi_star > chi_low-extra))), "Solution is out of bounds"
 
     return chi_star, pos_star, vel_star, bool_star
     
@@ -146,7 +151,7 @@ def offset_pos(pos,ind_origin,all_origins):
     pos += offset
     return pos
 
-def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, superslab_start, resume=False, plot=False):
+def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, superslab_start, resume=False, plot=False, complete=False):
     '''
     Main function.
     The algorithm: for each merger tree epoch, for 
@@ -201,8 +206,8 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, superslab_sta
     zs_all[-1] = float("%.1f" % zs_all[-1])  # LHG: I guess this is trying to match up to some filename or something?
 
     # get functions relating chi and z
-    chi_of_z = interp1d(zs_all, chis_all)
-    z_of_chi = interp1d(chis_all, zs_all)
+    chi_of_z = interp1d(np.insert(zs_all, 0, 0.), np.insert(chis_all, 0, 0.))
+    z_of_chi = interp1d(np.insert(chis_all, 0, 0.), np.insert(zs_all, 0, 0.))
     
     # if merger tree redshift information has been saved, load it (if not, save it)
     if not os.path.exists(Path("data_mt") / sim_name / "zs_mt.npy"):
@@ -266,8 +271,10 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, superslab_sta
         z_prev = zs_mt[i + 1]
         print("redshift of this and the previous snapshot = ", z_this, z_prev)
 
-        # coordinate distance of the light cone at this redshift and the previous
+        # check that you are starting at a reasonable redshift
         assert z_this >= np.min(zs_all), "You need to set starting redshift to the smallest value of the merger tree"
+            
+        # coordinate distance of the light cone at this redshift and the previous
         chi_this = chi_of_z(z_this)
         chi_prev = chi_of_z(z_prev)
         delta_chi = chi_prev - chi_this
@@ -292,7 +299,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, superslab_sta
         for counter in range(len(fns_this)):
             fns_this[counter] = str(fns_this[counter])
             fns_prev[counter] = str(fns_prev[counter])
-
+            
         # number of merger tree files
         print("number of files = ", len(fns_this), len(fns_prev))
         assert n_superslabs == len(fns_this) and n_superslabs == len(fns_prev), "Incomplete merger tree files"
@@ -412,21 +419,28 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, superslab_sta
                 
                 # halos that don't have merger tree information
                 Merger_this_noinfo = Merger_this[mask_noinfo_this].copy()
-                
+
+                # if interpolating to z = 0.1 (kinda ugly way to do this)
+                if complete and np.abs(z_this - 0.1) < 1.e-3:
+                    print(f"extending {z_this:4.3f} all the way to z = 0")
+                    chi_low = 0.
+                else:
+                    chi_low = chi_this
+                    
                 # select objects that are crossing the light cones
-                cond_1 = ((Merger_this_info['ComovingDistance'] > chi_this) & (Merger_this_info['ComovingDistance'] <= chi_prev))
-                cond_2 = ((Merger_prev_main_this_info['ComovingDistance'] > chi_this) & (Merger_prev_main_this_info['ComovingDistance'] <= chi_prev))
+                cond_1 = ((Merger_this_info['ComovingDistance'] > chi_low) & (Merger_this_info['ComovingDistance'] <= chi_prev))
+                cond_2 = ((Merger_prev_main_this_info['ComovingDistance'] > chi_low) & (Merger_prev_main_this_info['ComovingDistance'] <= chi_prev))
                 mask_lc_this_info = cond_1 | cond_2
                 del cond_1, cond_2
 
-                # for hals that have no merger tree information, we simply take their current position
+                # for halos that have no merger tree information, we simply take their current position
                 # og
-                cond_1 = (Merger_this_noinfo['ComovingDistance'] > chi_this - delta_chi_old / 2.0)
-                cond_2 = (Merger_this_noinfo['ComovingDistance'] <= chi_this + delta_chi / 2.0)
+                cond_1 = (Merger_this_noinfo['ComovingDistance'] > chi_low - delta_chi_old / 2.0)
+                cond_2 = (Merger_this_noinfo['ComovingDistance'] <= chi_low + delta_chi / 2.0)
                 '''
                 # TESTING
-                cond_1 = (Merger_this_noinfo['ComovingDistance'] > chi_this)
-                cond_2 = (Merger_this_noinfo['ComovingDistance'] <= chi_this + delta_chi)
+                cond_1 = (Merger_this_noinfo['ComovingDistance'] > chi_low)
+                cond_2 = (Merger_this_noinfo['ComovingDistance'] <= chi_low + delta_chi)
                 '''
                 mask_lc_this_noinfo = (cond_1 & cond_2)
                 del cond_1, cond_2
@@ -503,7 +517,8 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, superslab_sta
                     chi_prev,
                     chi_this,
                     Lbox,
-                    origin
+                    origin,
+                    complete=(complete and np.abs(z_this - 0.1) < 1.e-3) 
                 )
 
                 
@@ -705,6 +720,7 @@ if __name__ == '__main__':
     parser.add_argument('--superslab_start', help='Initial superslab where we start building the trees', type=int, default=DEFAULTS['superslab_start'])
     parser.add_argument('--resume', help='Resume the calculation from the checkpoint on disk', action='store_true')
     parser.add_argument('--plot', help='Want to show plots', action='store_true')
+    parser.add_argument('--complete', help='Interpolate the halos from  z = 0.1 to interpolate to z = 0', action='store_true')
     
     args = vars(parser.parse_args())
     main(**args)

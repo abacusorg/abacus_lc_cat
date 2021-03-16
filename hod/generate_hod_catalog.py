@@ -257,7 +257,7 @@ def gen_cent(halo_ids, halo_pos, halo_vels, halo_vrms, halo_mass, halo_zs, desig
 
     """
 
-    # TESTING
+    # TESTING NOTE
     #rng = np.random.RandomState(whatseed)
 
     '''
@@ -284,14 +284,15 @@ def gen_cent(halo_ids, halo_pos, halo_vels, halo_vrms, halo_mass, halo_zs, desig
     # compile the centrals
     pos_cents = halo_pos[mask_cents]
     vel_cents = halo_vels[mask_cents]
-    vel_cents[:, 2] += extra_vlos[mask_cents] # add on velocity bias
+    # TESTING NEWEST I THINK YOU WANT THIS IN THE PROJECTED DIRECTION
+    #vel_cents[:, 2] += extra_vlos[mask_cents] # add on velocity bias
     mass_cents = halo_mass[mask_cents]
     ids_cents = halo_ids[mask_cents]
     zs_cents = halo_zs[mask_cents]
     
     # rsd
     if rsd:
-        pos_cents[:, 2] = (pos_cents[:, 2] + vel_cents[:, 2]/velz2kms) #TESTING % lbox
+        pos_cents[:, 2] = (pos_cents[:, 2] + vel_cents[:, 2]/velz2kms) # TESTING NOTE % lbox
 
     # output to file
     newarray = np.concatenate((pos_cents, vel_cents, zs_cents[:,None], ids_cents[:, None], mass_cents[:, None]), axis = 1)
@@ -361,7 +362,7 @@ def gen_sats(halo_ids, halo_pos, halo_vels, halo_mass, halo_pstart, halo_pnum, p
 
 
     """
-    #np.random.seed(whatseed + 14838492)TESTING
+    #np.random.seed(whatseed + 14838492)TESTING NOTE
 
     # standard hod design
     #M_cut, M1, sigma, alpha, kappa = \
@@ -375,7 +376,7 @@ def gen_sats(halo_ids, halo_pos, halo_vels, halo_mass, halo_pstart, halo_pnum, p
         thishalo_id = halo_ids[i]
         thishalo_mass = halo_mass[i]
         # load the particle subsample belonging to the halo
-        start_ind = halo_pstart[i]
+        start_ind = np.int32(halo_pstart[i])
         # converting to int32 since numba does not recognize arange on uint32
         numparts = np.int32(halo_pnum[i])
         # if there are no particles in the particle subsample, move on
@@ -387,6 +388,8 @@ def gen_sats(halo_ids, halo_pos, halo_vels, halo_mass, halo_pstart, halo_pnum, p
         ss_vels = part_vel[start_ind: start_ind + numparts]
         ss_pos = part_pos[start_ind: start_ind + numparts]
         ss_zs = part_z[start_ind: start_ind + numparts]
+
+        # remove the missing particles TESTING IDEALLY SHOULD BE REMOVED IN POSTPROCESSING BEFORE THE CONVERSION
         missing_mask = ss_pids != 0
         ss_pids = ss_pids[missing_mask]
         ss_vels = ss_vels[missing_mask]
@@ -396,11 +399,12 @@ def gen_sats(halo_ids, halo_pos, halo_vels, halo_mass, halo_pstart, halo_pnum, p
         if numparts == 0:
             continue
         
+        
         # generate a list of random numbers that will track each particle
         random_list = np.random.random(numparts)
 
         # compute the expected number of satellites
-        # TESTING
+        # TESTING NOTE
         #N_sat = n_sat(halo_mass[i], design_array, m_cutoff) * halo_multi[i]
         #N_sat = n_sat(halo_mass[i], design_array, m_cutoff)
         N_sat = n_sat_ELG(halo_mass[i], design_array)
@@ -429,9 +433,8 @@ def gen_sats(halo_ids, halo_pos, halo_vels, halo_mass, halo_pstart, halo_pnum, p
         
         # rsd, modify the satellite positions by their velocities
         if rsd:
-            sat_pos[:,2] = (sat_pos[:,2] + sat_vels[:,2]/velz2kms)# TESTING % lbox
-
-
+            sat_pos[:,2] = (sat_pos[:,2] + sat_vels[:,2]/velz2kms)# TESTING NOTE % lbox
+        
         # output
         for j in range(len(sat_pos)):
             newline_sat = np.array([[sat_pos[j, 0],
@@ -481,10 +484,11 @@ def gen_gals(directory, design, fcent, fsats, rsd, params, m_cutoff = 1e11, what
 
     """
     
-    # TESTING
+    # make the design array global
     global design_array
     #og
     #design_array = np.array([M_cut, M1, sigma, alpha, kappa])
+    # if ELG
     design_array = np.array([design['p_max'], design['Q'], design['logM_cut'], design['kappa'], design['sigma'], design['logM1'], design['alpha'], design['gamma']])
     
     # box size
@@ -505,26 +509,36 @@ def gen_gals(directory, design, fcent, fsats, rsd, params, m_cutoff = 1e11, what
         maskedhalos = halos['data']
         
         # extracting the halo properties that we need
-        halo_ids = maskedhalos['id'][:] # halo IDs
-        #halo_pos = maskedhalos['x_L2com'] # halo positions, Mpc/h
-        halo_pos = maskedhalos['pos_interp'][:]+lbox/2. # halo positions, Mpc/h
-        #halo_vels = maskedhalos['v_L2com'] # halo velocities, km/s
-        halo_vels = maskedhalos['vel_interp'][:]+0. # TESTING # halo velocities, km/s
-        halo_vrms = maskedhalos['sigmav3d_L2com'] # halo velocity dispersions, km/s
         halo_mass = maskedhalos['N'][:]*params['Mpart'] # halo mass, Msun/h
-        halo_zs = maskedhalos['redshift_interp'][:] # halo redshifts
+        # TESTING NEWEST BUG!!! REMOVED IN OFFICIAL
         halo_pstart = maskedhalos['npstartA'][:] # starting index of particles
         halo_pnum = maskedhalos['npoutA'][:] # number of particles
+        halo_pstart_new = np.zeros(len(halo_pnum), dtype=int)
+        halo_pstart_new[1:] = np.cumsum(halo_pnum[:-1])
+        assert np.sum(halo_pstart_new - halo_pstart) == 0, "issues with the indexing gaaaaah"
+        # TESTING temporary remove unphysical masses BUG REMOVED IN OFFICIAL
+        mask_mass = halo_mass < 1.e17
+        assert np.sum(mask_mass) == len(mask_mass), "leftover issues with the halo masses gaaaah"
+        halo_mass = halo_mass[mask_mass]
+        halo_pstart = halo_pstart[mask_mass]
+        halo_pnum = halo_pnum[mask_mass]
+        halo_ids = maskedhalos['id'][mask_mass] # halo IDs
+        #halo_pos = maskedhalos['x_L2com'] # halo positions, Mpc/h
+        halo_pos = maskedhalos['pos_interp'][mask_mass]+lbox/2. # halo positions, Mpc/h
+        #halo_vels = maskedhalos['v_L2com'] # halo velocities, km/s
+        halo_vels = maskedhalos['vel_interp'][mask_mass]+0. # need the zero cause Table # halo velocities, km/s
+        halo_vrms = maskedhalos['sigmav3d_L2com'][mask_mass] # halo velocity dispersions, km/s
+        halo_zs = maskedhalos['redshift_interp'][mask_mass] # halo redshifts
         halo_multi = np.ones(len(halo_pnum))
         halo_submask = np.ones(len(halo_pnum),dtype=bool)
-        
         #halo_multi = maskedhalos['multi_halos'] # tuks no need 
         #halo_submask = maskedhalos['mask_subsample']  #tuks no need
-
+        
         # for each halo, generate central galaxies and output to file
         gen_cent(halo_ids, halo_pos, halo_vels, halo_vrms, halo_mass, halo_zs, 
                  design_array, rsd, fcent, velz2kms, lbox, m_cutoff = m_cutoff, whatseed = whatseed)
-
+        
+        
         # open particle file
         particles = asdf.open(os.path.join(directory,'pid_rv_lc.asdf'))
         subsample = particles['data']
@@ -533,14 +547,12 @@ def gen_gals(directory, design, fcent, fsats, rsd, params, m_cutoff = 1e11, what
         part_z = subsample['redshift'][:] 
         part_pid = subsample['pid'][:]
         
-        
         # for each halo, generate satellites and output to file        
         data_sats = gen_sats(halo_ids, halo_pos, 
                              halo_vels, halo_mass, halo_pstart, 
                              halo_pnum, part_pos, part_vel, part_z, part_pid,
                              rsd, velz2kms, lbox, m_cutoff = m_cutoff,
                              whatseed = whatseed)
-
         
         data_sats.tofile(fsats)
 

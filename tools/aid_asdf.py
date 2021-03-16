@@ -8,8 +8,7 @@ def load_lc_pid_rv(lc_pid_fn, lc_rv_fn, Lbox, PPD):
     # load and unpack pids
     lc_pids = asdf.open(lc_pid_fn, lazy_load=True, copy_arrays=True)
     lc_pid = lc_pids['data']['packedpid'][:]
-    lc_pid, lagr_pos, tagged, density = unpack_pids(lc_pid,Lbox,PPD)
-    del lagr_pos, tagged, density
+    lc_pid = unpack_pids(lc_pid, box=Lbox, ppd=PPD, pid=True)['pid']
     lc_pids.close()
 
     # load positions and velocities
@@ -23,13 +22,24 @@ def load_mt_pid(mt_fn,Lbox,PPD):
     print("load mtree file = ",mt_fn)
     mt_pids = asdf.open(mt_fn, lazy_load=True, copy_arrays=True)
     mt_pid = mt_pids['data']['pid'][:]
-    mt_pid, lagr_pos, tagged, density = unpack_pids(mt_pid,Lbox,PPD) 
-    del lagr_pos, tagged, density
-
+    mt_pid = unpack_pids(mt_pid, box=Lbox, ppd=PPD, pid=True)['pid']
     header = mt_pids['header']
     mt_pids.close()
 
     return mt_pid, header
+
+def load_mt_pid_pos_vel(mt_fn,Lbox,PPD):
+    # load mtree catalog
+    print("load mtree file = ",mt_fn)
+    mt_pids = asdf.open(mt_fn, lazy_load=True, copy_arrays=True)
+    mt_pid = mt_pids['data']['pid'][:]
+    mt_pid = unpack_pids(mt_pid, box=Lbox, ppd=PPD, pid=True)['pid']
+    mt_pos = mt_pids['data']['pos'][:]
+    mt_vel = mt_pids['data']['vel'][:]
+    header = mt_pids['header']
+    mt_pids.close()
+
+    return mt_pid, mt_pos, mt_vel, header
 
 def load_mt_npout(halo_mt_fn):
     # load mtree catalog
@@ -48,11 +58,11 @@ def load_mt_origin(halo_mt_fn):
     return mt_origin
 
 @jit(nopython = True)
-def reindex_pid(pid,npstart,npout):
+def reindex_pid(pid, npstart, npout):
     npstart_new = np.zeros(len(npout),dtype=np.int64)
     npstart_new[1:] = np.cumsum(npout)[:-1]
     npout_new = npout
-    pid_new = np.zeros(np.sum(npout_new),dtype=pid.dtype)
+    pid_new = np.zeros(np.sum(npout_new), dtype=pid.dtype)
 
     for j in range(len(npstart)):
         pid_new[npstart_new[j]:npstart_new[j]+npout_new[j]] = pid[npstart[j]:npstart[j]+npout[j]]

@@ -39,8 +39,8 @@ DEFAULTS['compaso_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus"
 DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
 #DEFAULTS['merger_parent'] = "/mnt/gosling2/bigsims/merger"
 DEFAULTS['merger_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus/merger"
-DEFAULTS['z_start'] = 0.350
-DEFAULTS['z_stop'] = 1.625
+DEFAULTS['z_start'] = 0.5#0.350
+DEFAULTS['z_stop'] = 0.5#1.625
 CONSTANTS = {'c': 299792.458}  # km/s, speed of light
 
 def extract_redshift(fn):
@@ -62,7 +62,7 @@ def correct_all_inds(halo_ids, N_halo_slabs, slabs, n_superslabs):
         ids[select] += offsets[counter]
     return ids
 
-def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_parent, save_pos=False, purge=False):
+def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_parent, save_pos=False, purge=False, complete=False):
 
     compaso_parent = Path(compaso_parent)
     catalog_parent = Path(catalog_parent)
@@ -117,8 +117,8 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
     fields_cat_mp = ['haloindex', 'haloindex_mainprog', 'v_L2com_mainprog', 'N_mainprog']
 
     # get functions relating chi and z
-    chi_of_z = interp1d(zs_all,chis_all)
-    z_of_chi = interp1d(chis_all,zs_all)
+    chi_of_z = interp1d(zs_all, chis_all)
+    z_of_chi = interp1d(chis_all, zs_all)
     
     # initial redshift where we start building the trees
     ind_start = np.argmin(np.abs(zs_mt-z_start))
@@ -131,7 +131,6 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
         tmp_files = list((cat_lc_dir / "tmp").glob("haloindex_*"))
         for i in range(len(tmp_files)):
             os.unlink(str(tmp_files[i]))
-
             
     # loop over each merger tree redshift
     for i in range(ind_start,ind_stop+1):
@@ -180,16 +179,23 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
         }
         
         # Merger_lc should have all fields (compaso + mainprog + interpolated)        
-        cols = {fields_cat[i]: np.ones(N_lc, dtype=(user_dt[fields_cat[i]])) for i in range(len(fields_cat))}
+        cols = {fields_cat[i]: np.zeros(N_lc, dtype=(user_dt[fields_cat[i]])) for i in range(len(fields_cat))}
         fields = []
         for i in range(len(fields_cat)):
             fields.append(fields_cat[i])
         for i in range(len(fields_cat_mp)):
-            cols[fields_cat_mp[i]] = np.ones(N_lc, dtype=(clean_dt_progen[fields_cat_mp[i]]))
+            # I think we don't need the main prog info
+            #cols[fields_cat_mp[i]] = np.zeros(N_lc, dtype=(clean_dt_progen[fields_cat_mp[i]]))
             fields.append(fields_cat_mp[i])
         for key in key_dic.keys():
-            cols[key_dic[key][0]] = np.ones(N_lc, dtype=key_dic[key][1])*2500
+            cols[key_dic[key][0]] = np.zeros(N_lc, dtype=key_dic[key][1])
         Merger_lc = Table(cols, copy=False)
+
+        # if we want to complete to z = 0, then turn on complete for z = 0.1 (we don't have shells past that)
+        if complete and np.abs(z_mt - 0.1) < 1.e-3:
+            save_z0 = True
+        else:
+            save_z0 = False
         
         # initialize index for filling halo information
         start = 0; file_no = 0
@@ -208,13 +214,29 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
             # origins for which information is available
             origins_k = origins_lc[slabs_lc == k]
 
+            if len(origins_k) == 0:
+                # offset all halos in given superslab
+                offset += N_halo_slabs[k]
+                continue
+
+            
             # list of halo indices
             halo_info_list = []
             for i in [0, 1, -1]:
                 halo_info_list.append(str(catdir / 'halo_info' / ('halo_info_%03d.asdf'%((k+i)%n_superslabs))))
-                
+
+            print(halo_info_list)
             # load the CompaSO catalogs
-            cat = CompaSOHaloCatalog(halo_info_list, load_subsamples='A_halo_pid', fields=fields, unpack_bits=False)                            
+            if (save_pos or save_z0):
+                try:
+                    cat = CompaSOHaloCatalog(halo_info_list, load_subsamples='A_halo_all', fields=fields, unpack_bits=False)
+                    loaded_pos = True
+                except:
+                    cat = CompaSOHaloCatalog(halo_info_list, load_subsamples='A_halo_pid', fields=fields, unpack_bits=False)
+                    loaded_pos = False
+            else:
+                cat = CompaSOHaloCatalog(halo_info_list, load_subsamples='A_halo_pid', fields=fields, unpack_bits=False)
+                loaded_pos = False
             
             # loop over each observer origin
             for o in origins_k:
@@ -251,7 +273,6 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
                 # correct halo indices
                 correction = N_halo_slabs[k] + N_halo_slabs[(k+1)%n_superslabs] + N_halo_slabs[(k-1)%n_superslabs] - N_halo_total
                 halo_ind_lc[halo_ind_lc > N_halo_total - N_halo_slabs[(k-1)%n_superslabs]] += correction
-
                 
                 # halo table
                 halo_table = cat.halos[halo_ind_lc]
@@ -260,6 +281,7 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
                 print("N_halos = ", N_halos)
                 assert N_halos == N_halo_total+correction, "mismatch between halo number in compaso catalog and in merger tree"
 
+                
                 # load eligibility information if it exists
                 if os.path.exists(cat_lc_dir / "tmp" / ("haloindex_z%4.3f_lc%d.%02d.npy"%(z_mt, o, k))):
                     haloindex_ineligible = np.load(cat_lc_dir / "tmp" / ("haloindex_z%4.3f_lc%d.%02d.npy"%(z_mt, o, k)))
@@ -269,40 +291,54 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
                     # decided this is bad cause of the particle indexing or rather the halo indexing that uses num and then the total number of particles
                     #halo_table = halo_table[mask_ineligible]
                     halo_table['N'][mask_ineligible] = 0
-                    halo_table['npstartA'][mask_ineligible] = -999
+                    halo_table['npstartA'][mask_ineligible] = -999 # note unsigned integer
                     halo_table['npoutA'][mask_ineligible] = 0
-                    print("percentage surviving halos after eligibility = ", 100.-np.sum(mask_ineligible)*100./len(mask_ineligible))
+                    print("percentage surviving halos after eligibility = ", 100.*(1-np.sum(mask_ineligible)/len(mask_ineligible)))
 
                     
                 # load the particle ids
                 pid = cat.subsamples['pid']
-                if save_pos and loaded_pos:
+                if (save_pos or save_z0) and loaded_pos:
                     pos = cat.subsamples['pos']
                     vel = cat.subsamples['vel']
 
                 # reindex npstart and npout for the new catalogs
                 npstart = halo_table['npstartA']
                 npout = halo_table['npoutA']
-                # fast track
-                pid_new, npstart_new, npout_new = reindex_pid(pid, npstart, npout)
+                # select the pids in this halo light cone, and index into them starting from 0
+                if (save_pos or save_z0) and loaded_pos:
+                    pid_new, pos_new, vel_new, npstart_new, npout_new = reindex_pid_pos_vel(pid, pos, vel, npstart, npout)
+                    del pid, pos, vel
+                else:
+                    pid_new, npstart_new, npout_new = reindex_pid(pid, npstart, npout)
+                    del pid
                 del npstart, npout
-                del pid
 
-                # change stuff
+                # assert that indexing is right
+                assert np.sum(npout_new) == len(pid_new), "mismatching indexing"
                 Merger_lc['npstartA'][start:start+num] = npstart_new + count
-                Merger_lc['npoutA'][start:start+num] = npout_new + count
+                Merger_lc['npoutA'][start:start+num] = npout_new
                 del npstart_new, npout_new
+
+                # increment number of particles in superslab and origin
+                count += len(pid_new)
                 
                 # create particle array
-                pid_table = Table({'pid': np.zeros(len(pid_new), pid_new.dtype)})
-                pid_table['pid'] = pid_new
-                count += len(pid_new)
-                del pid_new
+                if (save_pos or save_z0) and loaded_pos:
+                    pid_table = Table({'pid': np.zeros(len(pid_new), pid_new.dtype), 'pos': np.zeros((len(pid_new), 3), pos_new.dtype), 'vel': np.zeros((len(pid_new), 3), vel_new.dtype)})
+                    pid_table['pid'] = pid_new
+                    pid_table['pos'] = pos_new
+                    pid_table['vel'] = vel_new
+                    del pid_new, pos_new, vel_new
+                else:
+                    pid_table = Table({'pid': np.zeros(len(pid_new), pid_new.dtype)})
+                    pid_table['pid'] = pid_new
+                    del pid_new
 
                 # save the particles
                 save_asdf(pid_table, "pid_lc%d.%02d"%(o,k), header, cat_lc_dir / ("z%4.3f"%z_mt))
                 del pid_table
-                
+                                
                 # for halos that did not have interpolation and get the velocity from the halo info files
                 not_interp = (np.sum(np.abs(vel_interp_lc), axis=1) - 0.) < 1.e-6
                 print("percentage not interpolated = ", 100.*np.sum(not_interp)/len(not_interp))
@@ -310,7 +346,7 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
                 
                 # halos with merger tree info (0 for merged or smol, -999 for no info)
                 mask_info = halo_table['haloindex_mainprog'] > 0
-                print("percentage without merger tree info = ", 100. - np.sum(mask_info)*100./len(mask_info))
+                print("percentage without merger tree info = ", 100.*(1. - np.sum(mask_info)/len(mask_info)))
                 print("percentage of removed halos = ", np.sum(halo_table['N'] == 0) * 100./len(mask_info))
                 # I think that it may be possible that because in later redshifts (not z_start of build_mt),
                 # we have halos from past times, so it is possible that at some point some halo had merger tree
@@ -327,20 +363,25 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
                 # save the velocity information
                 Merger_lc['vel_interp'][start:start+num] = vel_interp_lc
                 del vel_interp_lc
-
-                # because unsigned need to remember which halos have N = 0
-                mask_unphysical = halo_table['N'] == 0
                 
                 # interpolated mass m = m1 + (m2-m1)/(chi1-chi2)*(chi-chi2)
-                mdot = (halo_table['N'].astype(float) - halo_table['N_mainprog'][:, 0].astype(float))/(chi_mt_mp - chi_mt)
-                m_star = halo_table['N_mainprog'][:, 0].astype(float) + mdot * (chi_mt_mp - merger_lc['InterpolatedComoving'])
-                m_star = np.round(m_star).astype(halo_table['N'].dtype)
-                halo_table['N'][mask_info] = m_star[mask_info]
-                halo_table['N'][mask_unphysical] = 0
-                del m_star, mdot, mask_unphysical
+                try:
+                    # TESTING
+                    mdot = (halo_table['N'].astype(float) - halo_table['N_mainprog'][:, 0].astype(float))/(chi_mt_mp - chi_mt)
+                    m_star = halo_table['N_mainprog'][:, 0].astype(float) + mdot * (chi_mt_mp - merger_lc['InterpolatedComoving'])
+                    # getting rid of negative masses which occur for halos with mass today = 0 or halos that come from the previous redshift (i.e. 1/2 to 1 and not 1 to 3/2)
+                    m_star[m_star < 0.] = 0.
+                    m_star = np.round(m_star).astype(halo_table['N'].dtype)
+                    halo_table['N'][mask_info] = m_star[mask_info]
+                    del m_star, mdot
+                except:
+                    print("failed for some reason")
+                    pass
                 
                 # copy the rest of the halo fields
                 for key in fields_cat:
+                    # those have already been reindexed
+                    if key == 'npstartA' or key == 'npoutA': continue
                     Merger_lc[key][start:start+num] = halo_table[key][:]
                 
                 # save information about halos that were used in this catalog and have merger tree information
@@ -353,14 +394,14 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
             # offset all halos in given superslab
             offset += N_halo_slabs[k]
             del cat
-                        
+
+        assert len(Merger_lc['redshift_interp']) == start, "Are you missing some halos?"
         #chi_interp_lc[chi_interp_lc < np.min(chis_all)] = np.min(chis_all)
         Merger_lc['redshift_interp'] = z_of_chi(Merger_lc['redshift_interp'])
         
         # save to files
         save_asdf(Merger_lc, "halo_info_lc", header, cat_lc_dir / ("z%4.3f"%z_mt))
         del Merger_lc
-
 
         # loop over each superslab
         file_no = 0
@@ -374,11 +415,19 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
                 
                 with asdf.open(cat_lc_dir / ("z%4.3f"%z_mt) / ("pid_lc%d.%02d.asdf"%(o,k)), lazy_load=True, copy_arrays=True) as f:
                     pid_lc = f['data']['pid'][:]
-
+                    if (save_pos or save_z0) and loaded_pos:
+                        pos_lc = f['data']['pos'][:]
+                        vel_lc = f['data']['vel'][:]
                 if file_no == 0:
-                    pid_table = Table({'pid': np.zeros(count, pid_lc.dtype)})
+                    if (save_pos or save_z0) and loaded_pos:
+                        pid_table = Table({'pid': np.zeros(count, pid_lc.dtype), 'pos': np.zeros((count, 3), pos_lc.dtype), 'vel': np.zeros((count, 3), vel_lc.dtype)})
+                    else:
+                        pid_table = Table({'pid': np.zeros(count, pid_lc.dtype)})
 
                 pid_table['pid'][offset:offset+len(pid_lc)] = pid_lc
+                if (save_pos or save_z0) and loaded_pos:
+                    pid_table['pos'][offset:offset+len(pid_lc)] = pos_lc
+                    pid_table['vel'][offset:offset+len(pid_lc)] = vel_lc
                 file_no += 1
                 offset += len(pid_lc)
         assert offset == count, "Missing particles somewhere"
@@ -403,6 +452,7 @@ if __name__ == '__main__':
     parser.add_argument('--merger_parent', help='Merger tree directory', default=(DEFAULTS['merger_parent']))
     parser.add_argument('--save_pos', help='Want to save positions', action='store_true')
     parser.add_argument('--purge', help='Purge the temporary files', action='store_true')
+    parser.add_argument('--complete', help='Save the positions and velocities of particles at z = 0.1 to interpolate to z = 0', action='store_true')
     
     args = vars(parser.parse_args())
     main(**args)
