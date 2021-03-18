@@ -505,43 +505,55 @@ def gen_gals(directory, design, fcent, fsats, rsd, params, m_cutoff = 1e11, what
     for i in np.arange(num_files):
 
         # open the halo files
-        halos = asdf.open(files[i])
-        maskedhalos = halos['data']
+        f = asdf.open(files[i])
+        halos = f['data']
+        f.close()
         
         # extracting the halo properties that we need
-        halo_mass = maskedhalos['N'][:]*params['Mpart'] # halo mass, Msun/h
-        # TESTING NEWEST BUG!!! REMOVED IN OFFICIAL
-        halo_pstart = maskedhalos['npstartA'][:] # starting index of particles
-        halo_pnum = maskedhalos['npoutA'][:] # number of particles
+        halo_mass = halos['N'][:]*params['Mpart'] # halo mass, Msun/h
+        # testing the npstarts
+        halo_pstart = halos['npstartA'][:] # starting index of particles
+        halo_pnum = halos['npoutA'][:] # number of particles
         halo_pstart_new = np.zeros(len(halo_pnum), dtype=int)
         halo_pstart_new[1:] = np.cumsum(halo_pnum[:-1])
         assert np.sum(halo_pstart_new - halo_pstart) == 0, "issues with the indexing gaaaaah"
-        # TESTING temporary remove unphysical masses BUG REMOVED IN OFFICIAL
+        # testing whether we have unphysical masses
         mask_mass = halo_mass < 1.e17
         assert np.sum(mask_mass) == len(mask_mass), "leftover issues with the halo masses gaaaah"
-        halo_mass = halo_mass[mask_mass]
-        halo_pstart = halo_pstart[mask_mass]
-        halo_pnum = halo_pnum[mask_mass]
-        halo_ids = maskedhalos['id'][mask_mass] # halo IDs
-        #halo_pos = maskedhalos['x_L2com'] # halo positions, Mpc/h
-        halo_pos = maskedhalos['pos_interp'][mask_mass]+lbox/2. # halo positions, Mpc/h
-        #halo_vels = maskedhalos['v_L2com'] # halo velocities, km/s
-        halo_vels = maskedhalos['vel_interp'][mask_mass]+0. # need the zero cause Table # halo velocities, km/s
-        halo_vrms = maskedhalos['sigmav3d_L2com'][mask_mass] # halo velocity dispersions, km/s
-        halo_zs = maskedhalos['redshift_interp'][mask_mass] # halo redshifts
+        halo_ids = halos['id'][:] # halo IDs
+
+        # clean repeated halose
+        mask_repeat = np.zeros(len(halo_mass), dtype=bool)
+        _, inds = np.unique(halo_ids, return_index=True)
+        mask_repeat[inds] = True
+        mask_repeat_parts = np.repeat(mask_repeat, halo_pnum)
+
+        # apply cleaning to the already loaded
+        halo_mass = halo_mass[mask_repeat]
+        halo_pstart = halo_pstart[mask_repeat]
+        halo_pnum = halo_pnum[mask_repeat]
+        halo_ids = halo_ids[mask_repeat]
+        
+        
+        #halo_pos = halos['x_L2com'] # halo positions, Mpc/h
+        halo_pos = halos['pos_interp'][mask_repeat]+lbox/2. # halo positions, Mpc/h
+        #halo_vels = halos['v_L2com'] # halo velocities, km/s
+        halo_vels = halos['vel_interp'][mask_repeat]+0. # need the zero cause Table # halo velocities, km/s
+        halo_vrms = halos['sigmav3d_L2com'][mask_repeat] # halo velocity dispersions, km/s
+        halo_zs = halos['redshift_interp'][mask_repeat] # halo redshifts
         halo_multi = np.ones(len(halo_pnum))
         halo_submask = np.ones(len(halo_pnum),dtype=bool)
-        #halo_multi = maskedhalos['multi_halos'] # tuks no need 
-        #halo_submask = maskedhalos['mask_subsample']  #tuks no need
+        #halo_multi = halos['multi_halos'] # not used 
+        #halo_submask = halos['mask_subsample']  # not used
         
         # for each halo, generate central galaxies and output to file
         gen_cent(halo_ids, halo_pos, halo_vels, halo_vrms, halo_mass, halo_zs, 
                  design_array, rsd, fcent, velz2kms, lbox, m_cutoff = m_cutoff, whatseed = whatseed)
         
-        
         # open particle file
-        particles = asdf.open(os.path.join(directory,'pid_rv_lc.asdf'))
-        subsample = particles['data']
+        f = asdf.open(os.path.join(directory,'pid_rv_lc.asdf'))
+        subsample = f['data'][mask_repeat_parts]
+        f.close()
         part_pos = subsample['pos'][:]+lbox/2. # Mpc/h
         part_vel = subsample['vel'][:] # km/s
         part_z = subsample['redshift'][:] 
@@ -555,9 +567,6 @@ def gen_gals(directory, design, fcent, fsats, rsd, params, m_cutoff = 1e11, what
                              whatseed = whatseed)
         
         data_sats.tofile(fsats)
-
-        halos.close()
-        particles.close()
 
 
 def gen_gal_cat(design, params, whatseed = 0):
