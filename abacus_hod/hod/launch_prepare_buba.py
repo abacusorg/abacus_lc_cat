@@ -1,5 +1,9 @@
-from prepare_buba import prepare_slab
+import os
+import glob
+
 import asdf
+
+from prepare_buba import prepare_slab
 
 # simulation and light cones specs
 simname = 'AbacusSummit_base_c000_ph006'
@@ -37,7 +41,7 @@ print("redshifts = ",redshifts)
 
 # loop through all available redshifts
 for z_mock in redshifts:
-    print(z_mock); continue
+
     # location to save the subsampled halos and particles
     savedir = f'/global/cscratch1/sd/boryanah/AbacusHOD_scratch/'+simname+'/z{z_mock:4.3f}/'
     #savedir = f'/mnt/gosling1/boryanah/AbacusHOD_scratch/'+simname+f'/z{z_mock:4.3f}/'
