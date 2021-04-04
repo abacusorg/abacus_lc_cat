@@ -49,6 +49,14 @@ def load_mt_npout(halo_mt_fn):
     f.close()
     return mt_npout
 
+def load_mt_npout_B(halo_mt_fn):
+    # load mtree catalog
+    print("load halo mtree file = ",halo_mt_fn)
+    f = asdf.open(halo_mt_fn, lazy_load=True, copy_arrays=True)
+    mt_npout = f['data']['npoutB'][:]
+    f.close()
+    return mt_npout
+
 def load_mt_origin(halo_mt_fn):
     # load mtree catalog
     print("load halo mtree file = ",halo_mt_fn)
@@ -56,6 +64,15 @@ def load_mt_origin(halo_mt_fn):
     mt_origin = f['data']['origin'][:]
     f.close()
     return mt_origin
+
+def load_mt_pos(halo_mt_fn):
+    # load mtree catalog
+    print("load halo mtree file = ",halo_mt_fn)
+    f = asdf.open(halo_mt_fn, lazy_load=True, copy_arrays=True)
+    mt_pos = f['data']['pos_interp'][:]
+    f.close()
+    return mt_pos
+
 
 @jit(nopython = True)
 def reindex_pid(pid, npstart, npout):
@@ -68,6 +85,27 @@ def reindex_pid(pid, npstart, npout):
         pid_new[npstart_new[j]:npstart_new[j]+npout_new[j]] = pid[npstart[j]:npstart[j]+npout[j]]
 
     return pid_new, npstart_new, npout_new
+
+@jit(nopython = True)
+def reindex_pid_AB(pid, npstartA, npoutA, npstartB, npoutB):
+    # offsets for subsample A and B
+    npstart_newAB = np.zeros(len(npoutA), dtype=np.int64)
+    npstart_newAB[1:] = np.cumsum(npoutA+npoutB)[:-1]
+
+    # those two are unchanged
+    npout_newA = npoutA
+    npout_newB = npoutB
+
+    # create new array for the pid's containing A and B
+    pid_new = np.zeros(np.sum(npout_newA+npout_newB), dtype=pid.dtype)
+
+    # fill the pid array with corresponding values
+    for j in range(len(npoutA)):
+        st = npstart_newAB[j]
+        pid_new[st:st+npout_newA[j]] = pid[npstartA[j]:npstartA[j]+npoutA[j]]
+        st += npout_newA[j]
+        pid_new[st:st+npout_newB[j]] = pid[npstartB[j]:npstartB[j]+npoutB[j]]
+    return pid_new, npstart_newAB, npout_newA, npout_newB
 
 @jit(nopython = True)
 def reindex_pid_pos(pid,pos,npstart,npout):
@@ -99,6 +137,33 @@ def reindex_pid_pos_vel(pid,pos,vel,npstart,npout):
             
     return pid_new, pos_new, vel_new, npstart_new, npout_new
 
+@jit(nopython = True)
+def reindex_pid_AB(pid, pos, vel, npstartA, npoutA, npstartB, npoutB):
+    # offsets for subsample A and B
+    npstart_newAB = np.zeros(len(npoutA), dtype=np.int64)
+    npstart_newAB[1:] = np.cumsum(npoutA+npoutB)[:-1]
+
+    # those two are unchanged
+    npout_newA = npoutA
+    npout_newB = npoutB
+
+    # create new array for the pid's containing A and B
+    pid_new = np.zeros(np.sum(npout_newA+npout_newB), dtype=pid.dtype)
+    pos_new = np.zeros(np.sum(npout_newA+npout_newB), dtype=pos.dtype)
+    vel_new = np.zeros(np.sum(npout_newA+npout_newB), dtype=vel.dtype)
+
+    # fill the pid array with corresponding values
+    for j in range(len(npoutA)):
+        st = npstart_newAB[j]
+        pid_new[st:st+npout_newA[j]] = pid[npstartA[j]:npstartA[j]+npoutA[j]]
+        pos_new[st:st+npout_newA[j]] = pos[npstartA[j]:npstartA[j]+npoutA[j]]
+        vel_new[st:st+npout_newA[j]] = vel[npstartA[j]:npstartA[j]+npoutA[j]]
+        st += npout_newA[j]
+        pid_new[st:st+npout_newB[j]] = pid[npstartB[j]:npstartB[j]+npoutB[j]]
+        pos_new[st:st+npout_newB[j]] = pos[npstartB[j]:npstartB[j]+npoutB[j]]
+        vel_new[st:st+npout_newB[j]] = vel[npstartB[j]:npstartB[j]+npoutB[j]]
+
+    return pid_new, pos_new, vel_new, npstart_newAB, npout_newA, npout_newB
 
 # save light cone catalog
 def save_asdf(table,filename,header,cat_lc_dir):

@@ -41,8 +41,8 @@ DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
 DEFAULTS['merger_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus/merger"
 #DEFAULTS['catalog_parent'] = "/mnt/gosling1/boryanah/light_cone_catalog/"
 DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
-DEFAULTS['z_start'] = 0.35
-DEFAULTS['z_stop'] = 0.35#1.625
+DEFAULTS['z_start'] = 0.8#725
+DEFAULTS['z_stop'] = 0.8#1.625
 DEFAULTS['superslab_start'] = 0
 CONSTANTS = {'c': 299792.458}  # km/s, speed of light
 
@@ -98,7 +98,7 @@ def get_mt_info(fn_load, fields, minified):
 def solve_crossing(r1, r2, pos1, pos2, chi1, chi2, Lbox, origin, complete=False, extra=4.):
     '''
     Solve when the crossing of the light cones occurs and the
-    interpolated position and velocity
+    interpolated position and velocity. Merger trees loook for progenitors in a 4 Mpc/h radius
     '''
 
     if complete:
@@ -107,10 +107,17 @@ def solve_crossing(r1, r2, pos1, pos2, chi1, chi2, Lbox, origin, complete=False,
         chi_low = chi2
 
     # periodic wrapping of the positions of the particles
-    r1, r2, pos1, pos2 = wrapping(r1, r2, pos1, pos2, chi1, chi_low, Lbox, origin)
+    r1, r2, pos1, pos2 = wrapping(r1, r2, pos1, pos2, chi1, chi_low, Lbox, origin, extra)
     
     # assert wrapping worked
     assert np.all(((r2 <= chi1) & (r2 > chi_low)) | ((r1 <= chi1) & (r1 > chi_low))), "Wrapping didn't work"
+
+    # in a very very very very small number of cases (i.e. z = 0.8, corner halos), the current halo position
+    # and the main progenitor would both be within chi1 and chi2, but will be on opposite ends. In that case,
+    # we will just move things to the side of whoever's closer to the interpolated position (or just pick one)
+    print(np.array(pos1[np.abs(pos2 - pos1) > extra]))
+    print(np.array(pos2[np.abs(pos2 - pos1) > extra]))
+    assert np.sum(np.abs(pos2 - pos1) > extra) == 0, "There are halos on opposite ends after wrapping"
     
     # solve for chi_star, where chi(z) = eta(z=0)-eta(z)
     # equation is r1+(chi1-chi)/(chi1-chi2)*(r2-r1) = chi, with solution:
@@ -120,7 +127,7 @@ def solve_crossing(r1, r2, pos1, pos2, chi1, chi2, Lbox, origin, complete=False,
     v_avg = (pos2 - pos1) / (chi1 - chi2)
     pos_star = pos1 + v_avg * (chi1 - chi_star[:, None])
 
-    # enforce boundary conditions by periodic wrapping -- Daniel said no (TESTING)
+    # enforce boundary conditions by periodic wrapping
     #pos_star[pos_star >= Lbox/2.] = pos_star[pos_star >= Lbox/2.] - Lbox
     #pos_star[pos_star < -Lbox/2.] = pos_star[pos_star < -Lbox/2.] + Lbox
     

@@ -50,7 +50,7 @@ def dist(pos1, pos2, L=None):
     return dist
 
 @nb.njit
-def wrapping(r1, r2, pos1, pos2, chi1, chi2, Lbox, origin):
+def wrapping(r1, r2, pos1, pos2, chi1, chi2, Lbox, origin, extra):
 
     # read dimension of data
     N, nd = pos1.shape
@@ -88,5 +88,40 @@ def wrapping(r1, r2, pos1, pos2, chi1, chi2, Lbox, origin):
                 dist = pos2[i][j] - origin[j]
                 delta += dist*dist
             r2[i] = np.sqrt(delta)
+        # breaks the beau symmetry of the code but this is in cases
+        # where main prog and halo are on opposite ends but within r1,2
+        # we choose to modify pos2 because for the main box chi_star ~ 1990
+        # which is closer to chi1 = 2008 (chi2 = 1865)
+        else:
+            if np.abs(pos1[i][0] - pos2[i][0]) > extra:
+                if pos2[i][0] >= 0:
+                    pos2[i][0] -= Lbox
+                else:
+                    pos2[i][0] += Lbox
+                delta = 0.
+                for j in range(nd):
+                    dist = pos2[i][j] - origin[j]
+                    delta += dist*dist
+                r2[i] = np.sqrt(delta)
+            if np.abs(pos1[i][1] - pos2[i][1]) > extra:
+                if pos2[i][1] >= 0:
+                    pos2[i][1] -= Lbox
+                else:
+                    pos2[i][1] += Lbox
+                delta = 0.
+                for j in range(nd):
+                    dist = pos2[i][j] - origin[j]
+                    delta += dist*dist
+                r2[i] = np.sqrt(delta)
+            if np.abs(pos1[i][2] - pos2[i][2]) > extra:
+                if pos2[i][2] >= 0:
+                    pos2[i][2] -= Lbox
+                else:
+                    pos2[i][2] += Lbox
+                delta = 0.
+                for j in range(nd):
+                    dist = pos2[i][j] - origin[j]
+                    delta += dist*dist
+                r2[i] = np.sqrt(delta)
 
     return r1, r2, pos1, pos2

@@ -24,7 +24,7 @@ import argparse
 from astropy.table import Table
 
 from abacusnbody.data.compaso_halo_catalog import CompaSOHaloCatalog, user_dt, clean_dt_progen
-from tools.aid_asdf import save_asdf, reindex_pid, reindex_pid_pos_vel
+from tools.aid_asdf import save_asdf, reindex_pid, reindex_pid_pos_vel, reindex_pid_pos_vel_AB, reindex_pid_AB
 from tools.merger import simple_load, get_halos_per_slab, get_zs_from_headers, get_halos_per_slab_origin, extract_superslab, extract_superslab_minified, unpack_inds
 
 # these are probably just for testing; should be removed for production
@@ -39,8 +39,8 @@ DEFAULTS['compaso_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus"
 DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
 #DEFAULTS['merger_parent'] = "/mnt/gosling2/bigsims/merger"
 DEFAULTS['merger_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus/merger"
-DEFAULTS['z_start'] = 0.5#0.350
-DEFAULTS['z_stop'] = 0.5#1.625
+DEFAULTS['z_start'] = 0.45#0.350
+DEFAULTS['z_stop'] = 0.725#1.625
 CONSTANTS = {'c': 299792.458}  # km/s, speed of light
 
 def extract_redshift(fn):
@@ -62,7 +62,7 @@ def correct_all_inds(halo_ids, N_halo_slabs, slabs, n_superslabs):
         ids[select] += offsets[counter]
     return ids
 
-def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_parent, save_pos=False, purge=False, complete=False):
+def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_parent, save_pos=False, purge=False, complete=False, want_subsample_B=True):
 
     compaso_parent = Path(compaso_parent)
     catalog_parent = Path(catalog_parent)
@@ -113,7 +113,12 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
         print(f.keys())
         fields_cat = f['data'].keys()
     # just for testing; remove for final version
-    fields_cat = ['id', 'npstartA', 'npoutA', 'N', 'x_L2com', 'v_L2com', 'sigmav3d_L2com']
+    if want_subsample_B:
+        fields_cat = ['id', 'npstartA', 'npoutA', 'npstartB', 'npoutB', 'N', 'x_L2com', 'v_L2com', 'sigmav3d_L2com']
+        subsample_str = 'AB'
+    else:
+        fields_cat = ['id', 'npstartA', 'npoutA', 'N', 'x_L2com', 'v_L2com', 'sigmav3d_L2com']
+        subsample_str = 'A'
     fields_cat_mp = ['haloindex', 'haloindex_mainprog', 'v_L2com_mainprog', 'N_mainprog']
 
     # get functions relating chi and z
@@ -229,13 +234,13 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
             # load the CompaSO catalogs
             if (save_pos or save_z0):
                 try:
-                    cat = CompaSOHaloCatalog(halo_info_list, load_subsamples='A_halo_all', fields=fields, unpack_bits=False)
+                    cat = CompaSOHaloCatalog(halo_info_list, load_subsamples=f'{subsample_str:s}_halo_all', fields=fields, unpack_bits=False)
                     loaded_pos = True
                 except:
-                    cat = CompaSOHaloCatalog(halo_info_list, load_subsamples='A_halo_pid', fields=fields, unpack_bits=False)
+                    cat = CompaSOHaloCatalog(halo_info_list, load_subsamples=f'{subsample_str:s}_halo_pid', fields=fields, unpack_bits=False)
                     loaded_pos = False
             else:
-                cat = CompaSOHaloCatalog(halo_info_list, load_subsamples='A_halo_pid', fields=fields, unpack_bits=False)
+                cat = CompaSOHaloCatalog(halo_info_list, load_subsamples=f'{subsample_str:s}_halo_pid', fields=fields, unpack_bits=False)
                 loaded_pos = False
             
             # loop over each observer origin
@@ -293,6 +298,9 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
                     halo_table['N'][mask_ineligible] = 0
                     halo_table['npstartA'][mask_ineligible] = -999 # note unsigned integer
                     halo_table['npoutA'][mask_ineligible] = 0
+                    if want_subsample_B:
+                        halo_table['npstartB'][mask_ineligible] = -999 # note unsigned integer
+                        halo_table['npoutB'][mask_ineligible] = 0
                     print("percentage surviving halos after eligibility = ", 100.*(1-np.sum(mask_ineligible)/len(mask_ineligible)))
 
                     
@@ -303,21 +311,41 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
                     vel = cat.subsamples['vel']
 
                 # reindex npstart and npout for the new catalogs
-                npstart = halo_table['npstartA']
-                npout = halo_table['npoutA']
+                npstartA = halo_table['npstartA']
+                npoutA = halo_table['npoutA']
                 # select the pids in this halo light cone, and index into them starting from 0
-                if (save_pos or save_z0) and loaded_pos:
-                    pid_new, pos_new, vel_new, npstart_new, npout_new = reindex_pid_pos_vel(pid, pos, vel, npstart, npout)
-                    del pid, pos, vel
+                if want_subsample_B:
+                    npstartB = halo_table['npstartB']
+                    npoutB = halo_table['npoutB']
+
+                    if (save_pos or save_z0) and loaded_pos:
+                        pid_new, pos_new, vel_new, npstart_new, npout_new, npout_new_B = reindex_pid_pos_vel_AB(pid, pos, vel, npstartA, npoutA, npstartB, npoutB)
+                        del pid, pos, vel
+                    else:
+                        pid_new, npstart_new, npout_new, npout_new_B = reindex_pid_AB(pid, npstartA, npoutA, npstartB, npoutB)
+                        del pid
+                    del npstartA, npoutA, npstartB, npoutB
                 else:
-                    pid_new, npstart_new, npout_new = reindex_pid(pid, npstart, npout)
-                    del pid
-                del npstart, npout
+                    if (save_pos or save_z0) and loaded_pos:
+                        pid_new, pos_new, vel_new, npstart_new, npout_new = reindex_pid_pos_vel(pid, pos, vel, npstartA, npoutA)
+                        del pid, pos, vel
+                    else:
+                        pid_new, npstart_new, npout_new = reindex_pid(pid, npstartA, npoutA)
+                        del pid
+                    del npstartA, npoutA
 
                 # assert that indexing is right
-                assert np.sum(npout_new) == len(pid_new), "mismatching indexing"
+                if want_subsample_B:
+                    assert np.sum(npout_new+npout_new_B) == len(pid_new), "mismatching indexing"
+                else:
+                    assert np.sum(npout_new) == len(pid_new), "mismatching indexing"
+
+                # offset for this superslab and origin
                 Merger_lc['npstartA'][start:start+num] = npstart_new + count
                 Merger_lc['npoutA'][start:start+num] = npout_new
+                if want_subsample_B:
+                    Merger_lc['npoutB'][start:start+num] = npout_new_B
+                    del npout_new_B
                 del npstart_new, npout_new
 
                 # increment number of particles in superslab and origin
@@ -380,8 +408,9 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
                 
                 # copy the rest of the halo fields
                 for key in fields_cat:
-                    # those have already been reindexed
+                    # from the CompaSO fields, those have already been reindexed
                     if key == 'npstartA' or key == 'npoutA': continue
+                    if key == 'npstartB' or key == 'npoutB': continue
                     Merger_lc[key][start:start+num] = halo_table[key][:]
                 
                 # save information about halos that were used in this catalog and have merger tree information
@@ -453,6 +482,7 @@ if __name__ == '__main__':
     parser.add_argument('--save_pos', help='Want to save positions', action='store_true')
     parser.add_argument('--purge', help='Purge the temporary files', action='store_true')
     parser.add_argument('--complete', help='Save the positions and velocities of particles at z = 0.1 to interpolate to z = 0', action='store_true')
+    parser.add_argument('--want_subsample_B', help='If this option is called, will only work with subsample A and exclude B', action='store_false')
     
     args = vars(parser.parse_args())
     main(**args)

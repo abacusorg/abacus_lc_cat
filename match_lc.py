@@ -11,7 +11,7 @@ from scipy.interpolate import interp1d
 import argparse
 from astropy.table import Table
 
-from tools.aid_asdf import save_asdf, load_mt_pid, load_mt_pid_pos_vel, load_mt_npout, load_lc_pid_rv, load_mt_origin, reindex_pid_pos_vel
+from tools.aid_asdf import save_asdf, load_mt_pid, load_mt_pos, load_mt_pid_pos_vel, load_mt_npout, load_mt_npout_B, load_lc_pid_rv, load_mt_origin, reindex_pid_pos_vel
 from bitpacked import unpack_rvint, unpack_pids
 from tools.merger import get_zs_from_headers, get_one_header
 from tools.read_headers import get_lc_info
@@ -30,8 +30,8 @@ DEFAULTS['light_cone_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacu
 DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
 #DEFAULTS['merger_parent'] = "/mnt/gosling2/bigsims/merger/"
 DEFAULTS['merger_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus/merger"
-DEFAULTS['z_lowest'] = 0.350
-DEFAULTS['z_highest'] = 1.625
+DEFAULTS['z_lowest'] = 0.95#0.45#0.350
+DEFAULTS['z_highest'] = 1.1#0.58#0.725#1.625
 
 # return the mt catalog names straddling the given redshift
 def get_mt_fns(z_th, zs_mt, chis_mt, cat_lc_dir):
@@ -59,7 +59,7 @@ def extract_steps(fn):
     step = np.int(split_fn.split('.asdf')[0])
     return step
 
-def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merger_parent, resume=False, complete=False):
+def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merger_parent, resume=False, complete=False, want_subsample_B=True):
     light_cone_parent = Path(light_cone_parent)
     catalog_parent = Path(catalog_parent)
     merger_parent = Path(merger_parent)
@@ -71,7 +71,7 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
     # simulation parameters
     Lbox = header['BoxSize']
     PPD = header['ppd']
-
+    
     # directory where we have saved the final outputs from merger trees and halo catalogs
     cat_lc_dir = catalog_parent / sim_name / "halos_light_cones"
 
@@ -134,7 +134,7 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
         # check if resuming from an old state
         infile = InputFile(cat_lc_dir / "tmp" / "match.log")
         z_last = infile.z_last
-        assert (np.abs(z_last-z_highest) <= 6.0e-1), "Your recorded state is not for the currently requested redshift, can't resume from old. Last recorded state is z = %.3f"%z_last
+        assert (np.abs(z_last-z_highest) <= 1.e-1), "Your recorded state is not for the currently requested redshift, can't resume from old. Last recorded state is z = %.3f"%z_last
     else:
         z_last = -1
         if os.path.exists(cat_lc_dir / "tmp" / "match.log"):
@@ -144,6 +144,7 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
     currently_loaded_zs = []
     currently_loaded_headers = []
     currently_loaded_npouts = []
+    currently_loaded_pos = []
     currently_loaded_origins = []
     currently_loaded_pids = []
     currently_loaded_tables = []
@@ -205,10 +206,15 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
             # load new merger tree catalog
             mt_pid, header = load_mt_pid(mt_fns[i], Lbox, PPD)
             halo_mt_npout = load_mt_npout(halo_mt_fns[i])
+            if want_subsample_B:
+                halo_mt_npout += load_mt_npout_B(halo_mt_fns[i])
             halo_mt_origin = load_mt_origin(halo_mt_fns[i])
+            halo_mt_pos = load_mt_pos(halo_mt_fns[i])
             mt_origins = np.repeat(halo_mt_origin, halo_mt_npout)
+            mt_pos = np.repeat(halo_mt_pos, halo_mt_npout, axis=0)
             del halo_mt_origin
-            # Remove for Lehman's
+            del halo_mt_pos
+            # Remove npouts unless applying Lehman's idea
             del halo_mt_npout
             
             # start the light cones table for this redshift
@@ -226,6 +232,7 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
             currently_loaded_pids.append(mt_pid)
             # Useful for Lehman's
             #currently_loaded_npouts.append(halo_mt_npout)
+            currently_loaded_pos.append(mt_pos)
             currently_loaded_origins.append(mt_origins)
             currently_loaded_tables.append(lc_table_final)
 
@@ -261,6 +268,7 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
                 mt_pid = currently_loaded_pids[which_mt[0]]
                 # Useful for Lehman's
                 #halo_mt_npout = currently_loaded_npouts[which_mt[0]]
+                mt_pos = currently_loaded_pos[which_mt[0]]
                 mt_origins = currently_loaded_origins[which_mt[0]]
                 header = currently_loaded_headers[which_mt[0]]
                 lc_table_final = currently_loaded_tables[which_mt[0]]
@@ -271,43 +279,71 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
                 # original version start
                 t1 = time.time()
                 i_sort_lc_pid = np.argsort(lc_pid)
-                inds_mt_pid = np.arange(len(mt_pid))[mt_origins == origin]
-                mt_in_lc = match(mt_pid[inds_mt_pid], lc_pid, arr2_index=i_sort_lc_pid)
-                comm2 = mt_in_lc[mt_in_lc > -1]
-                comm1 = inds_mt_pid[mt_in_lc > -1]
-                pid_mt_lc = mt_pid[comm1]
-                print("time = ", time.time()-t1)
-                del mt_in_lc, inds_mt_pid, i_sort_lc_pid
+                origins = np.unique(mt_origins)
+                for o in origins:
+                    if o == origin:
+                        first_condition = mt_origins == origin
+                        second_condition = np.ones(len(mt_origins), dtype=bool)
+                    elif origin == 0 and o == 1:
+                        first_condition = mt_origins == o
+                        second_condition = mt_pos[:, 2] < Lbox/2.+10.
+                    elif origin == 0 and o == 2:
+                        first_condition = mt_origins == o
+                        second_condition = mt_pos[:, 1] < Lbox/2.+10.
+                    elif origin == 1 and o == 0:
+                        first_condition = mt_origins == o
+                        second_condition = mt_pos[:, 2] > Lbox/2.-10.
+                    elif origin == 2 and o == 0:
+                        first_condition = mt_origins == o
+                        second_condition = mt_pos[:, 1] > Lbox/2.-10.
+                    elif origin == 1 and o == 2:
+                        continue
+                    elif origin == 2 and o == 1:
+                        continue
+                    condition = first_condition & second_condition
+                    if np.sum(condition) == 0: continue
+                    print("o and origin, percentage of particles = ", o, origin, np.sum(condition)/len(condition))
+                        
+                    # match the pids in the merger trees and the light cones
+                    inds_mt_pid = np.arange(len(mt_pid))[condition]
+                    mt_in_lc = match(mt_pid[inds_mt_pid], lc_pid, arr2_index=i_sort_lc_pid)
+                    comm2 = mt_in_lc[mt_in_lc > -1]
+                    comm1 = inds_mt_pid[mt_in_lc > -1]
+                    pid_mt_lc = mt_pid[comm1]
+                    print("time = ", time.time()-t1)
+                    del mt_in_lc, inds_mt_pid
                 
-                # select the intersected positions
-                pos_mt_lc, vel_mt_lc = unpack_rvint(lc_rv[comm2], boxsize=Lbox)
+                    # select the intersected positions
+                    pos_mt_lc, vel_mt_lc = unpack_rvint(lc_rv[comm2], boxsize=Lbox)
                 
-                # print percentage of matched pids
-                print("at z = %.3f, matched = "%mt_z, len(comm1)*100./(len(mt_pid)))
-                # original version end
+                    # print percentage of matched pids
+                    print("at z = %.3f, matched = "%mt_z, len(comm1)*100./(len(mt_pid)))
+                    # original version end
                 
-                '''
-                # alternative Lehman implementation start
-                t1 = time.time()
-                comm1, nmatch, hrvint = match_halo_pids_to_lc_rvint(halo_mt_npout, mt_pid, lc_rv, lc_pid)
-                print("at z = %.3f, matched = "%mt_z,len(hrvint)*100./(len(mt_pid)))
-                print("time = ", time.time()-t1)
+                    '''
+                    # alternative Lehman implementation start
+                    t1 = time.time()
+                    comm1, nmatch, hrvint = match_halo_pids_to_lc_rvint(halo_mt_npout, mt_pid, lc_rv, lc_pid)
+                    print("at z = %.3f, matched = "%mt_z,len(hrvint)*100./(len(mt_pid)))
+                    print("time = ", time.time()-t1)
                 
-                pos_mt_lc, vel_mt_lc = unpack_rvint(hrvint,Lbox)
-                pid_mt_lc = mt_pid[comm1]                
-                # alternative Lehman implementation end
-                '''
+                    pos_mt_lc, vel_mt_lc = unpack_rvint(hrvint,Lbox)
+                    pid_mt_lc = mt_pid[comm1]                
+                    # alternative Lehman implementation end
+                    '''
 
-                # offset depending on which light cone we are at
-                pos_mt_lc += offset_lc
+                    # offset depending on which light cone we are at
+                    pos_mt_lc += offset_lc
                 
-                # save the pid, position, velocity and redshift
-                lc_table_final['pid'][comm1] = pid_mt_lc
-                lc_table_final['pos'][comm1] = pos_mt_lc
-                lc_table_final['vel'][comm1] = vel_mt_lc
-                lc_table_final['redshift'][comm1] = np.ones(len(pid_mt_lc))*z_this
-                del pid_mt_lc, pos_mt_lc, vel_mt_lc
-                del comm1, comm2
+                    # save the pid, position, velocity and redshift
+                    lc_table_final['pid'][comm1] = pid_mt_lc
+                    lc_table_final['pos'][comm1] = pos_mt_lc
+                    lc_table_final['vel'][comm1] = vel_mt_lc
+                    lc_table_final['redshift'][comm1] = np.ones(len(pid_mt_lc))*z_this
+                    del pid_mt_lc, pos_mt_lc, vel_mt_lc
+                    del comm1, comm2
+                    gc.collect()
+                del i_sort_lc_pid
                 
             print("-------------------")
             del lc_pid, lc_rv
@@ -370,5 +406,6 @@ if __name__ == '__main__':
     parser.add_argument('--merger_parent', help='Merger tree directory', default=(DEFAULTS['merger_parent']))
     parser.add_argument('--resume', help='Resume the calculation from the checkpoint on disk', action='store_true')
     parser.add_argument('--complete', help='Save the particle information down to z = 0', action='store_true')
+    parser.add_argument('--want_subsample_B', help='If this option is called, will only work with subsample A and exclude B', action='store_false')
     args = vars(parser.parse_args())
     main(**args)
