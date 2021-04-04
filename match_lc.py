@@ -144,8 +144,8 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
     currently_loaded_zs = []
     currently_loaded_headers = []
     currently_loaded_npouts = []
-    currently_loaded_pos = []
     currently_loaded_origins = []
+    currently_loaded_pos = []
     currently_loaded_pids = []
     currently_loaded_tables = []
     for step in range(step_start,step_stop+1):
@@ -200,6 +200,7 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
                 currently_loaded_headers = currently_loaded_headers[1:]
                 currently_loaded_pids = currently_loaded_pids[1:]
                 currently_loaded_origins = currently_loaded_origins[1:]
+                currently_loaded_pos = currently_loaded_pos[1:]
                 currently_loaded_npouts = currently_loaded_npouts[1:]
                 currently_loaded_tables = currently_loaded_tables[1:]
 
@@ -389,6 +390,7 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
         currently_loaded_headers = currently_loaded_headers[1:]
         currently_loaded_pids = currently_loaded_pids[1:]
         currently_loaded_origins = currently_loaded_origins[1:]
+        currently_loaded_pos = currently_loaded_pos[1:]
         currently_loaded_npouts = currently_loaded_npouts[1:]
         currently_loaded_tables = currently_loaded_tables[1:]
 
