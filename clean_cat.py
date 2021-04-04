@@ -24,8 +24,8 @@ DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
 #DEFAULTS['sim_name'] = "AbacusSummit_huge_c000_ph201"
 #DEFAULTS['catalog_parent'] = "/mnt/gosling1/boryanah/light_cone_catalog/"
 DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
-DEFAULTS['z_start'] = 0.651#0.8#0.350
-DEFAULTS['z_stop'] = 0.651#1.625
+DEFAULTS['z_start'] = 0.8#0.350
+DEFAULTS['z_stop'] = 0.8#1.625
 
 # save light cone catalog
 def save_asdf(table, filename, header, cat_lc_dir):
@@ -200,27 +200,6 @@ def main(sim_name, z_start, z_stop, catalog_parent, want_subsample_B=True):
         else:
             str_edges = "_all"
             halo_mask = np.ones(len(halo_x), dtype=bool)
-
-
-
-        '''
-        # BIG CHECK
-        origin = np.array([-990., -990., -990.])
-        dist = np.sqrt(np.sum((halo_pos - origin)**2, axis=1))
-        print(np.min(dist), np.max(dist))
-        quit()
-        parts_pos = table_parts['pos']
-        #dist = np.sqrt(np.sum((parts_pos - origin)**2, axis=1))
-        #print(np.min(dist), np.max(dist))
-        #halo_pos = table_halo['pos_interp']
-        parts_halo_pos = np.repeat(halo_pos, table_halo['npoutA'], axis=0)
-        parts_dist = parts_halo_pos - parts_pos
-        parts_dist = np.sqrt(np.sum(parts_dist**2, axis=1))
-        print("min dist = ", np.min(parts_dist))
-        print("max dist = ", np.max(parts_dist))
-        quit()
-        # BIG CHECK
-        '''
         
 
         # figure out how many origins for the given redshifts
@@ -233,7 +212,6 @@ def main(sim_name, z_start, z_stop, catalog_parent, want_subsample_B=True):
         # add to the halo mask requirement that halos be unique (for a given origin)
         for origin in unique_origins:
 
-
             # boolean array making halos at this origin
             mask_origin = halo_origin == origin
 
@@ -245,8 +223,27 @@ def main(sim_name, z_start, z_stop, catalog_parent, want_subsample_B=True):
             halo_mask_extra[halo_inds[inds]] = True
 
             # how many halos were left
-            print("non-unique masking = ", len(inds)*100./np.sum(mask_origin))
+            print("non-unique masking %d = "%origin, len(inds)*100./np.sum(mask_origin))
 
+        
+
+        # additionally remove halos that are repeated on the borders (0 & 1 and 0 & 2)
+        origin_xyz_dic = {1: 2, 2: 1}
+
+        for key in origin_xyz_dic.keys():
+            # select halos in the original box and the copies as long as they on the boundary
+            mask_origin = ((halo_origin == 0) | ((halo_origin == key) & (halo_pos[:, origin_xyz_dic[key]] < Lbox/2.+offset)))
+
+            # halo indices for this origin
+            halo_inds = np.arange(len(halo_mask), dtype=int)[mask_origin]
+
+            # find unique halo indices (already for specific origins)
+            _, inds = np.unique(halo_index[mask_origin], return_index=True)
+            halo_mask_extra[halo_inds[inds]] = True
+
+            # how many halos were left
+            print("non-unique masking extra %d = "%key, len(inds)*100./np.sum(mask_origin))
+            
         # add the extra mask coming from the uniqueness requirement
         halo_mask &= halo_mask_extra
 
