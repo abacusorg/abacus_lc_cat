@@ -30,8 +30,8 @@ DEFAULTS['light_cone_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacu
 DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
 #DEFAULTS['merger_parent'] = "/mnt/gosling2/bigsims/merger/"
 DEFAULTS['merger_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus/merger"
-DEFAULTS['z_lowest'] = 0.95#0.45#0.350
-DEFAULTS['z_highest'] = 1.1#0.58#0.725#1.625
+DEFAULTS['z_lowest'] = 0.350
+DEFAULTS['z_highest'] = 1.22#1.625
 
 # return the mt catalog names straddling the given redshift
 def get_mt_fns(z_th, zs_mt, chis_mt, cat_lc_dir):
@@ -166,10 +166,13 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
         mt_chi_mean = np.mean(mt_chis)
 
         # how many shells are we including on both sides, including mid point (total of 2j+1)
-        buffer_no = 1#2 TESTING is 1 enough?
+        buffer_no = 1#2 1 should be enough
 
         # is this the redshift that's closest to the bridge between two redshifts 
         mid_bool = (np.argmin(np.abs(mt_chi_mean-chis_all)) <= j+buffer_no) & (np.argmin(np.abs(mt_chi_mean-chis_all)) >= j-buffer_no)
+
+        # TESTING
+        mid_bool = True
         
         # if not in between two redshifts, we just need one catalog -- the one it is closest to
         if not mid_bool:
@@ -203,7 +206,8 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
                 currently_loaded_pos = currently_loaded_pos[1:]
                 currently_loaded_npouts = currently_loaded_npouts[1:]
                 currently_loaded_tables = currently_loaded_tables[1:]
-
+                gc.collect()
+                
             # load new merger tree catalog
             mt_pid, header = load_mt_pid(mt_fns[i], Lbox, PPD)
             halo_mt_npout = load_mt_npout(halo_mt_fns[i])
@@ -217,6 +221,7 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
             del halo_mt_pos
             # Remove npouts unless applying Lehman's idea
             del halo_mt_npout
+            gc.collect()
             
             # start the light cones table for this redshift
             lc_table_final = Table(
@@ -313,7 +318,8 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
                     pid_mt_lc = mt_pid[comm1]
                     print("time = ", time.time()-t1)
                     del mt_in_lc, inds_mt_pid
-                
+                    gc.collect()
+                    
                     # select the intersected positions
                     pos_mt_lc, vel_mt_lc = unpack_rvint(lc_rv[comm2], boxsize=Lbox)
                 
@@ -345,6 +351,7 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
                     del comm1, comm2
                     gc.collect()
                 del i_sort_lc_pid
+                gc.collect()
                 
             print("-------------------")
             del lc_pid, lc_rv
@@ -393,7 +400,8 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
         currently_loaded_pos = currently_loaded_pos[1:]
         currently_loaded_npouts = currently_loaded_npouts[1:]
         currently_loaded_tables = currently_loaded_tables[1:]
-
+        gc.collect()
+        
 class ArgParseFormatter(argparse.RawDescriptionHelpFormatter, argparse.ArgumentDefaultsHelpFormatter):
     pass
         
