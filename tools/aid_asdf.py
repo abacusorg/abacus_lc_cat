@@ -19,7 +19,7 @@ def load_lc_pid_rv(lc_pid_fn, lc_rv_fn, Lbox, PPD):
 
 def load_mt_pid(mt_fn,Lbox,PPD):
     # load mtree catalog
-    print("load mtree file = ",mt_fn)
+    print("load mtree file = ", mt_fn)
     mt_pids = asdf.open(mt_fn, lazy_load=True, copy_arrays=True)
     mt_pid = mt_pids['data']['pid'][:]
     mt_pid = unpack_pids(mt_pid, box=Lbox, ppd=PPD, pid=True)['pid']
@@ -30,7 +30,7 @@ def load_mt_pid(mt_fn,Lbox,PPD):
 
 def load_mt_pid_pos_vel(mt_fn,Lbox,PPD):
     # load mtree catalog
-    print("load mtree file = ",mt_fn)
+    print("load mtree file = ", mt_fn)
     mt_pids = asdf.open(mt_fn, lazy_load=True, copy_arrays=True)
     mt_pid = mt_pids['data']['pid'][:]
     mt_pid = unpack_pids(mt_pid, box=Lbox, ppd=PPD, pid=True)['pid']
@@ -51,7 +51,7 @@ def load_mt_npout(halo_mt_fn):
 
 def load_mt_npout_B(halo_mt_fn):
     # load mtree catalog
-    print("load halo mtree file = ",halo_mt_fn)
+    print("load halo mtree file = ", halo_mt_fn)
     f = asdf.open(halo_mt_fn, lazy_load=True, copy_arrays=True)
     mt_npout = f['data']['npoutB'][:]
     f.close()
@@ -59,7 +59,7 @@ def load_mt_npout_B(halo_mt_fn):
 
 def load_mt_origin(halo_mt_fn):
     # load mtree catalog
-    print("load halo mtree file = ",halo_mt_fn)
+    print("load halo mtree file = ", halo_mt_fn)
     f = asdf.open(halo_mt_fn, lazy_load=True, copy_arrays=True)
     mt_origin = f['data']['origin'][:]
     f.close()
@@ -67,12 +67,19 @@ def load_mt_origin(halo_mt_fn):
 
 def load_mt_pos(halo_mt_fn):
     # load mtree catalog
-    print("load halo mtree file = ",halo_mt_fn)
+    print("load halo mtree file = ", halo_mt_fn)
     f = asdf.open(halo_mt_fn, lazy_load=True, copy_arrays=True)
     mt_pos = f['data']['pos_interp'][:]
     f.close()
     return mt_pos
 
+def load_mt_pos_yz(halo_mt_fn):
+    # load mtree catalog
+    print("load halo mtree file = ", halo_mt_fn)
+    f = asdf.open(halo_mt_fn, lazy_load=True, copy_arrays=True)
+    mt_pos_yz = f['data']['pos_interp'][:, 1:]
+    f.close()
+    return mt_pos_yz
 
 @jit(nopython = True)
 def reindex_pid(pid, npstart, npout):
@@ -138,7 +145,7 @@ def reindex_pid_pos_vel(pid,pos,vel,npstart,npout):
     return pid_new, pos_new, vel_new, npstart_new, npout_new
 
 @jit(nopython = True)
-def reindex_pid_AB(pid, pos, vel, npstartA, npoutA, npstartB, npoutB):
+def reindex_pid_pos_vel_AB(pid, pos, vel, npstartA, npoutA, npstartB, npoutB):
     # offsets for subsample A and B
     npstart_newAB = np.zeros(len(npoutA), dtype=np.int64)
     npstart_newAB[1:] = np.cumsum(npoutA+npoutB)[:-1]

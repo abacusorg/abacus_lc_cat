@@ -24,11 +24,13 @@ DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
 #DEFAULTS['sim_name'] = "AbacusSummit_huge_c000_ph201"
 #DEFAULTS['catalog_parent'] = "/mnt/gosling1/boryanah/light_cone_catalog/"
 DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
-DEFAULTS['z_start'] = 0.8#0.350
-DEFAULTS['z_stop'] = 0.8#1.625
+DEFAULTS['z_start'] = 1.251#0.8#0.350
+DEFAULTS['z_stop'] = 1.251#0.8#1.625
 
-# save light cone catalog
 def save_asdf(table, filename, header, cat_lc_dir):
+    """
+    Save light cone catalog
+    """
     # cram into a dictionary
     data_dict = {}
     for field in table.keys():
@@ -47,13 +49,17 @@ def save_asdf(table, filename, header, cat_lc_dir):
 
 @njit
 def fast_avg(vel, npout):
+    """
+    Compute the average position/velocity for each halo given an array containing the particle positions/velocities 
+    for all halos and another array with the number of particles per halo
+    """
     nstart = 0
     v_int = np.zeros((len(npout), 3), dtype=np.float32)
     for i in range(len(npout)):
         if npout[i] == 0: continue
         v = vel[nstart:nstart+npout[i]]
 
-        s = np.array([0, 0, 0])
+        s = np.array([0., 0., 0.])
         for k in range(npout[i]):
             for j in range(3):
                 s[j] += v[k][j]
@@ -66,7 +72,8 @@ def fast_avg(vel, npout):
     return v_int
 
 def vrange(starts, stops):
-    """Create concatenated ranges of integers for multiple start/stop
+    """
+    Create concatenated ranges of integers for multiple start/stop
 
     Parameters:
         starts (1-D array_like): starts for each range
@@ -76,18 +83,19 @@ def vrange(starts, stops):
         numpy.ndarray: concatenated ranges
 
     For example:
-
         >>> starts = [1, 3, 4, 6]
         >>> stops  = [1, 5, 7, 6]
         >>> vrange(starts, stops)
         array([3, 4, 4, 5, 6])
-
     """
     stops = np.asarray(stops)
     l = stops - starts # Lengths of each range.
     return np.repeat(stops - l.cumsum(), l) + np.arange(l.sum())
     
 def compress_asdf(asdf_fn, table, header):
+    """
+    Given the file name of the asdf file, the table and the header, compress the table info and save as `asdf_fn' 
+    """
     # cram into a dictionary
     data_dict = {}
     for field in table.keys():
@@ -105,11 +113,15 @@ def compress_asdf(asdf_fn, table, header):
         af.write_to(fp, all_array_compression="blsc")
 
 def extract_redshift(fn):
+    """
+    Extract the redshift value from the file name
+    """
     red = float(str(fn).split('z')[-1][:5])
     return red
 
 def float_trunc(a, zerobits):
-    """Set the least significant <zerobits> bits to zero in a numpy float32 or float64 array.
+    """
+    Set the least significant <zerobits> bits to zero in a numpy float32 or float64 array.
     Do this in-place. Also return the updated array.
     Maximum values of 'nzero': 51 for float64; 22 for float32.
     """
@@ -127,9 +139,22 @@ def float_trunc(a, zerobits):
         bits &= mask
     return a
 
-
-
 def main(sim_name, z_start, z_stop, catalog_parent, want_subsample_B=True):
+    """
+    Main function: this script is for cleaning up the final halo light cone catalogs: in particular, 
+    we remove the halos and their particles from the edges; we also remove the repeated halos (and their
+    particles) from the box(es). Special care is taken when we have repeated halos on the boundary
+    between two boxes (0 and 1 or 2), where we need to order halos in order of their y (for origin = 3)
+    and z (for origin = 2). We then find the unique halos for origin 1 and origin 2 (and combine the
+    halo indices). We find the unique halos in 0 or 1 (z < Lbox/2+10.) erasing any previous information about
+    the halos living there (so that we avoid the case that a halo was unique in 1, but is not unique anymore
+    because it appears in 0 and 1). We dind the unique halos in 0 or 1 (y < Lbox/2+10) erasing any previous 
+    information abotu the halos living there (so that we avoid the case that a halo was unique in 2, but is not
+    unique anymore because it appears in 0 and 2).  Next, we deal with the particles, where we remove all 
+    particles for which we couldn't find matches. We compute the average position of the halo based on the A
+    and B particle sumbsamples and finally, we scale down the particle subsamples to only include subsample A.
+    Everything is compressed and floats are truncated for the particles.
+    """
     # location of the light cone catalogs
     catalog_parent = Path(catalog_parent)
     
@@ -144,7 +169,8 @@ def main(sim_name, z_start, z_stop, catalog_parent, want_subsample_B=True):
     # loop through all available redshifts
     for z_current in redshifts:
         print("current redshift = ", z_current)
-
+        
+        # skip the redshift if not between the desired start and stop
         if (z_current < z_start) or (z_current > z_stop): continue
         
         # load the halo light cone catalog
@@ -163,7 +189,7 @@ def main(sim_name, z_start, z_stop, catalog_parent, want_subsample_B=True):
             parts_header = f['header']
             table_parts = f['data']
 
-        # parse the halo positions, npstart, npoutA and halo ids
+        # parse the halo positions, npstart, npoutA and halo ids (can reduce data usage with del's)
         halo_pos = table_halo['pos_interp']
         halo_x = halo_pos[:, 0]
         halo_y = halo_pos[:, 1]
@@ -175,10 +201,12 @@ def main(sim_name, z_start, z_stop, catalog_parent, want_subsample_B=True):
         if want_subsample_B:
             halo_npout += table_halo['npoutB']
         halo_origin = table_halo['origin']
-
-        # pars the particle id's
+        #halo_index = table_halo['id']
+        
+        # parse the particle id's
         parts_pid = table_parts['pid']
 
+        # if we are removing the edges get rid of halos 10 Mpc/h off the x, y and z edges
         remove_edges = True
         if remove_edges:
             str_edges = ""
@@ -209,43 +237,53 @@ def main(sim_name, z_start, z_stop, catalog_parent, want_subsample_B=True):
         # start an empty boolean array which will have "True" for only unique halos
         halo_mask_extra = np.zeros(len(halo_x), dtype=bool)
 
+        # origin 1 relates to z direction while origin 2 relates to y direction
+        origin_xyz_dic = {1: 2, 2: 1}
+        
         # add to the halo mask requirement that halos be unique (for a given origin)
         for origin in unique_origins:
-
+            # skip the original box
+            if origin == 0: continue
+            
             # boolean array making halos at this origin
             mask_origin = halo_origin == origin
-
+            
             # halo indices for this origin
             halo_inds = np.arange(len(halo_mask), dtype=int)[mask_origin]
 
+            # reorder halos outwards (in order of z for origin 2 and y for origin 1)
+            i_sort = np.argsort((halo_pos[:, origin_xyz_dic[origin]])[halo_inds])
+            halo_inds = halo_inds[i_sort]
+            
             # find unique halo indices (already for specific origins)
-            _, inds = np.unique(halo_index[mask_origin], return_index=True)
+            _, inds = np.unique(halo_index[halo_inds], return_index=True)
             halo_mask_extra[halo_inds[inds]] = True
-
+            
             # how many halos were left
             print("non-unique masking %d = "%origin, len(inds)*100./np.sum(mask_origin))
 
-        
-
         # additionally remove halos that are repeated on the borders (0 & 1 and 0 & 2)
-        origin_xyz_dic = {1: 2, 2: 1}
-
+        halo_mask_extra2 = np.zeros(len(halo_x), dtype=bool)
+        
         for key in origin_xyz_dic.keys():
-            # select halos in the original box and the copies as long as they on the boundary
-            mask_origin = ((halo_origin == 0) | ((halo_origin == key) & (halo_pos[:, origin_xyz_dic[key]] < Lbox/2.+offset)))
+            
+            # select calos in the original box (cond1) and halos living in box 1 (z < Lbox/2+10.) or box 2 (y < Lbox/2+10.)
+            cond1 = np.arange(len(halo_mask), dtype=int)[halo_origin == 0]
+            cond2 = np.arange(len(halo_mask), dtype=int)[(halo_origin == key) & (halo_pos[:, origin_xyz_dic[key]] < Lbox/2.+offset)]
 
-            # halo indices for this origin
-            halo_inds = np.arange(len(halo_mask), dtype=int)[mask_origin]
+            # combine the conditions above
+            halo_inds = np.hstack((cond1, cond2))
+            _, inds = np.unique(halo_index[halo_inds], return_index=True)
 
-            # find unique halo indices (already for specific origins)
-            _, inds = np.unique(halo_index[mask_origin], return_index=True)
+            # overwrite the information about the halos living in 0 or 1 (z < Lbox/2+10.) and then 0 or 2 (y < Lbox/2+10.)
+            halo_mask_extra[halo_inds] = False
             halo_mask_extra[halo_inds[inds]] = True
 
             # how many halos were left
-            print("non-unique masking extra %d = "%key, len(inds)*100./np.sum(mask_origin))
-            
+            print("non-unique masking extra %d = "%key, len(inds)*100./len(halo_inds))
+
         # add the extra mask coming from the uniqueness requirement
-        halo_mask &= halo_mask_extra
+        halo_mask &= halo_mask_extra        
 
         # repeat halo mask npout times to get a mask for the particles
         parts_mask = np.repeat(halo_mask, halo_npout)
@@ -263,17 +301,16 @@ def main(sim_name, z_start, z_stop, catalog_parent, want_subsample_B=True):
         # add to the particle mask, particles whose pid equals 0
         parts_mask_extra = parts_pid != 0
         parts_mask &= parts_mask_extra
-
         print("pid == 0 masking = ", np.sum(parts_mask_extra)*100./len(parts_mask))
 
         # filter out the host halo indices of the particles left after removing halos near edges, non-unique halos and particles that were not matched
         parts_halo_inds = parts_halo_inds[parts_mask]
 
-        # requires more thought cause it changes the npouts
+        # we can now count how many particles were left per halo and indicate the starting index and the count in the npstart and npout (note that this is A and B)
         uni_halo_inds, inds, counts = np.unique(parts_halo_inds, return_index=True, return_counts=True)
-        print("how many halos' lives did you ruin? = ", num_uni_hosts - len(inds))
+        print("how many halos' lives did you ruin? = ", num_uni_hosts - len(inds)) # sometimes we would have gotten rid of all particles in a halo (very rare)
         table_halo['npstartA'][:] = -999
-        table_halo['npoutA'][:] = 0# todo I think that this will have A and B # could perhaps use the old npstartA here for counts
+        table_halo['npoutA'][:] = 0
         table_halo['npstartA'][uni_halo_inds] = inds
         table_halo['npoutA'][uni_halo_inds] = counts
 
@@ -283,15 +320,14 @@ def main(sim_name, z_start, z_stop, catalog_parent, want_subsample_B=True):
         for key in table_halo.keys():
             table_halo[key] = table_halo[key][halo_mask]
 
-        # simple checks
+        # check for whether the npouts add up to the number of particles; whether we got rid of all pid == 0; whether we got rid of all non-unique halos
         assert np.sum(table_halo['npoutA']) == len(table_parts['pid']), "different number of particles and npout expectation"
         assert np.sum(table_parts['pid'] == 0) == 0, "still some particles with pid == 0"
-        unique_origins = np.unique(table_halo['origin'])
-        print("unique origins = ", unique_origins)
-        for origin in unique_origins:
-            assert len(np.unique(table_halo['index_halo'][origin == table_halo['origin']])) == np.sum(origin == table_halo['origin']), "still some non-unique halos left"
+        for key in origin_xyz_dic.keys():
+            condition = (key == table_halo['origin']) | (0 == table_halo['origin'])
+            assert len(np.unique(table_halo['index_halo'][condition])) == np.sum(condition), "still some non-unique halos left %d vs. %d"%(len(np.unique(table_halo['index_halo'][condition])), np.sum(condition))
 
-        # complicated checks
+        # check for whether the particles stray too far away from their halos
         parts_pos = table_parts['pos']
         parts_vel = table_parts['vel']
         halo_pos = table_halo['pos_interp']
@@ -300,17 +336,12 @@ def main(sim_name, z_start, z_stop, catalog_parent, want_subsample_B=True):
         parts_dist = np.sqrt(np.sum(parts_dist**2, axis=1))
         print("min dist = ", np.min(parts_dist))
         print("max dist = ", np.max(parts_dist))
-        print(np.array(parts_pos[np.max(parts_dist) == parts_dist]))
-        print(np.array(parts_halo_pos[np.max(parts_dist) == parts_dist]))
 
         # adding average velocity and position from subsample A (and B)
         halo_pos_avg = fast_avg(parts_pos, table_halo['npoutA'])
         halo_vel_avg = fast_avg(parts_vel, table_halo['npoutA'])
-        table_halo['pos_avg'] = halo_pos_avg
-        table_halo['vel_avg'] = halo_vel_avg
 
-
-        # scaling down to only use the A subsample
+        # scaling down to only record the A subsample
         halo_npoutA = halo_npoutA[halo_mask]
         mask_lost = halo_npoutA > table_halo['npoutA']
         print("halos that now have fewer particles left than the initial subsample A = ", np.sum(mask_lost))
@@ -318,14 +349,22 @@ def main(sim_name, z_start, z_stop, catalog_parent, want_subsample_B=True):
         starts = table_halo['npstartA'].astype(int)
         stops = starts + halo_npoutA.astype(int)
         parts_inds = vrange(starts, stops)
-
+        
         # record the particles and the halos
         table_halo['npoutA'] = halo_npoutA
         for key in table_parts.keys():
             table_parts[key] = table_parts[key][parts_inds]
+        #table_parts = Table(table_parts)
 
+        # add columns for the averaged position and velocity
+        table_halo = Table(table_halo)
+        table_halo.add_column(np.zeros(halo_pos_avg.shape, dtype=np.float32), copy=False, name='pos_avg')
+        table_halo.add_column(np.zeros(halo_vel_avg.shape, dtype=np.float32), copy=False, name='vel_avg')
+        table_halo['pos_avg'][:] = halo_pos_avg
+        table_halo['vel_avg'][:] = halo_vel_avg
+        
         '''
-        # save asdf without compression (perhaps name can be lc_halo_info.asdf and lc_pid_rc.asdf
+        # save asdf without compression or truncation
         save_asdf(table_parts, "lc"+str_edges+"_pid_rv", parts_header, cat_lc_dir / ("z%4.3f"%z_current))
         save_asdf(table_halo, "lc"+str_edges+"_halo_info", halo_header, cat_lc_dir / ("z%4.3f"%z_current))
         '''
@@ -345,16 +384,13 @@ def main(sim_name, z_start, z_stop, catalog_parent, want_subsample_B=True):
 class ArgParseFormatter(argparse.RawDescriptionHelpFormatter, argparse.ArgumentDefaultsHelpFormatter):
     pass
 
-
 if __name__ == '__main__':
-
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=ArgParseFormatter)
-    
+    # parser arguments
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=ArgParseFormatter)    
     parser.add_argument('--sim_name', help='Simulation name', default=DEFAULTS['sim_name'])
     parser.add_argument('--z_start', help='Initial redshift where we start building the trees', type=float, default=DEFAULTS['z_start'])
     parser.add_argument('--z_stop', help='Final redshift (inclusive)', type=float, default=DEFAULTS['z_stop'])
     parser.add_argument('--catalog_parent', help='Light cone catalog directory', default=(DEFAULTS['catalog_parent']))
     parser.add_argument('--want_subsample_B', help='If this option is called, will only work with subsample A and exclude B', action='store_false')
-    
     args = vars(parser.parse_args())
     main(**args)
