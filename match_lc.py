@@ -31,7 +31,7 @@ DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
 #DEFAULTS['merger_parent'] = "/mnt/gosling2/bigsims/merger/"
 DEFAULTS['merger_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus/merger"
 DEFAULTS['z_lowest'] = 0.350
-DEFAULTS['z_highest'] = 1.22 # 1.625 # 1.12 # TESTING
+DEFAULTS['z_highest'] = 1.139 # 1.06751798815032 # TESTING # 1.139 # 1.625
 
 def get_mt_fns(z_th, zs_mt, chis_mt, cat_lc_dir):
     """
@@ -66,7 +66,7 @@ def extract_steps(fn):
 
 def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merger_parent, resume=False, want_subsample_B=True):
     """
-    Main method: for each step in the light cone files, figure out the two closest halo light cone catalogs and load relevant information
+    Main algorithm: for each step in the light cone files, figure out the two closest halo light cone catalogs and load relevant information
     from these into the "currently_loaded" lists (if the step is far from the midpoint between the two, load only a single redshift catalog). 
     Then figure out which are the step files associated with the current step (1 to 3) and load the redshift catalogs corresponding to this
     step (1 or 2) from the "currently_loaded" lists. Then consider all combinations of light cone origins and redshift catalog origins 
@@ -195,14 +195,21 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
             mt_fns = [mt_fns[np.argmin(np.abs(mt_chis-chi_this))]]
             halo_mt_fns = [halo_mt_fns[np.argmin(np.abs(mt_chis-chi_this))]] 
             mt_zs = [mt_zs[np.argmin(np.abs(mt_chis-chi_this))]] 
+        print("using redshifts = ",mt_zs)
 
+        # if we have loaded two zs but are only using one, that means that we are past the mid-point and can dismiss and record the first one
+        if len(currently_loaded_zs) > len(mt_zs):
+            dismiss = True
+        else:
+            dismiss = False
+            
         # load the two straddled merger tree files and store them into lists of currently loaded things
         for i in range(len(mt_fns)):
             # check if catalog is already loaded and don't load if so
             if mt_zs[i] in currently_loaded_zs: print("skipped loading catalog ", mt_zs[i]); continue
 
-            # discard the old redshift catalog and record its data (equals because we are just about to load the third one)
-            if len(currently_loaded_zs) >= 2:
+            # discard the old redshift catalog and record its data (equals because we are just about to load the third one) (in fairness, first condition never true anymore)
+            if len(currently_loaded_zs) >= 2 or dismiss:
                 # check whether we are resuming and whether this is the redshift last written into the log file
                 if resume and np.abs(currently_loaded_zs[0] - z_last) < 1.e-6:
                     print("This redshift (z = %.3f) has already been recorded, skipping"%z_last)
@@ -259,7 +266,6 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
             #currently_loaded_npouts.append(halo_mt_npout)
 
         print("currently loaded redshifts = ",currently_loaded_zs)    
-        print("using redshifts = ",mt_zs)
         
         # find all light cone file names that correspond to this time step
         choice_fns = np.where(step_fns == step_this)[0]
@@ -312,7 +318,7 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
 
                 # loop through each of the available origins
                 for o in origins:
-                    # consider boundary conditions
+                    # consider boundary conditions (can probably be sped up if you say if origin 0 and o 1 didn't find anyone, don't check o 0 and o 1, 2
                     if o == origin:
                         first_condition = mt_origins == origin
                         second_condition = np.ones(len(mt_origins), dtype=bool)
