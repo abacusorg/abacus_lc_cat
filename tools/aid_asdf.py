@@ -77,9 +77,31 @@ def load_mt_pos_yz(halo_mt_fn):
     # load mtree catalog
     print("load halo mtree file = ", halo_mt_fn)
     f = asdf.open(halo_mt_fn, lazy_load=True, copy_arrays=True)
-    mt_pos_yz = f['data']['pos_interp'][:, 1:]
+    mt_pos_yz = f['data']['pos_interp'][:, 1:].astype(np.float16)
     f.close()
     return mt_pos_yz
+
+def load_mt_cond_edge(halo_mt_fn, Lbox):
+    # load mtree catalog
+    print("load halo mtree file = ", halo_mt_fn)
+    f = asdf.open(halo_mt_fn, lazy_load=True, copy_arrays=True)
+    mt_pos_yz = f['data']['pos_interp'][:, 1:]
+    cond01 = (mt_pos_yz[:, 1] < Lbox/2.+10.)
+    cond02 = (mt_pos_yz[:, 0] < Lbox/2.+10.)
+    cond10 = (mt_pos_yz[:, 1] > Lbox/2.-10.)
+    cond20 = (mt_pos_yz[:, 0] > Lbox/2.-10.)
+    mt_cond_edge = np.vstack((cond01, cond02, cond10, cond20)).T
+    f.close()
+    return mt_cond_edge
+
+def load_mt_dist(halo_mt_fn, origin):
+    # load mtree catalog
+    print("load halo mtree file = ", halo_mt_fn)
+    f = asdf.open(halo_mt_fn, lazy_load=True, copy_arrays=True)
+    mt_pos = f['data']['pos_interp']
+    f.close()
+    mt_dist = np.sqrt(np.sum((mt_pos - origin)**2, axis=1)).astype(np.float32)
+    return mt_dist
 
 @jit(nopython = True)
 def reindex_pid(pid, npstart, npout):

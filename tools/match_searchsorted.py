@@ -18,33 +18,21 @@ def match(arr1, arr2, arr2_sorted=False, arr2_index=None):
     It is assumed that each element in arr1 only occurs once in arr2.
     """
 
-    # Workaround for a numpy bug (<=1.4): ensure arrays are native endian
-    # because searchsorted ignores endian flag
-    #if not(arr1.dtype.isnative):
-    #    arr1_n = asarray(arr1, dtype=arr1.dtype.newbyteorder("="))
-    #else:
-    #    arr1_n = arr1
-    #if not(arr2.dtype.isnative):
-    #    arr2_n = asarray(arr2, dtype=arr2.dtype.newbyteorder("="))
-    #else:
-    #    arr2_n = arr2
-
-    arr1_n = arr1
-    arr2_n = arr2
+    #arr1_n = arr1
+    #arr2_n = arr2
 
     # Sort arr2 into ascending order if necessary
-    tmp1 = arr1_n
+    tmp1 = arr1
     if arr2_sorted:
-        tmp2 = arr2_n
-        #idx = slice(0,len(arr2_n))
+        tmp2 = arr2
     else:
         if arr2_index is None:
-            idx = argsort(arr2_n)
-            tmp2 = arr2_n[idx]
+            idx = argsort(arr2)
+            tmp2 = arr2[idx]
         else:
             # Use supplied sorting index
             idx = arr2_index
-            tmp2 = arr2_n[arr2_index]
+            tmp2 = arr2[arr2_index]
 
     # Find where elements of arr1 are in arr2
     ptr  = searchsorted(tmp2, tmp1)
@@ -56,17 +44,104 @@ def match(arr1, arr2, arr2_sorted=False, arr2_index=None):
     ptr[ptr<0]          = 0
 
     # Return -1 where no match is found
-    ind  = where(tmp2[ptr] != tmp1)[0]
-    ptr[ind] = -1
-
+    ptr[where(tmp2[ptr] != tmp1)[0]] = -1
+    
     # Put ptr back into original order
     if arr2_sorted:
-        ind = arange(len(arr2_n))
+        ptr = where(ptr>= 0, arange(len(tmp2))[ptr], -1)
     else:
-        ind = arange(len(arr2_n))[idx]
-    ptr = where(ptr>= 0, ind[ptr], -1)
+        ind = arange(len(arr2))[idx]
+        ptr = where(ptr>= 0, ind[ptr], -1)
 
     return ptr
+
+
+@jit(nopython=True)
+def match_reduced(arr1, arr2):
+    """
+    For each element in arr1 return the index of the element with the
+    same value in arr2, or -1 if there is no element with the same value.
+    It is assumed that arr2 is already sorted into ascending order and
+    that each element in arr1 only occurs once in arr2.
+    """
+
+    # Find where elements of arr1 are in arr2
+    ptr = zeros(len(arr1), dtype=np.int32)
+    ptr[:] = searchsorted(arr2, arr1)
+
+    # Make sure all elements in ptr are valid indexes into arr2
+    # (any out of range entries won't match so they'll get set to -1
+    # in the next bit)
+    ptr[ptr >= len(arr2)] = 0
+    ptr[ptr < 0]          = 0
+
+    # Return -1 where no match is found
+    ptr[where(arr2[ptr] != arr1)[0]] = -1
+    
+    # Put ptr back into original order
+    ptr = where(ptr >= 0, arange(len(arr2), dtype=np.int32)[ptr], -1)
+
+    return ptr
+
+
+@jit(nopython=True)
+def match_srt(arr1, arr2, cond):
+    """
+    For each element in arr1 return the index of the element with the
+    same value in arr2, or -1 if there is no element with the same value.
+    It is assumed that arr2 is already sorted into ascending order and
+    that each element in arr1 only occurs once in arr2.
+    """
+
+    # Find where elements of arr1 are in arr2
+    ptr = zeros(len(arr1), dtype=np.int32)
+    ptr[:] = searchsorted(arr2, arr1)
+
+    # Make sure all elements in ptr are valid indexes into arr2
+    # (any out of range entries won't match so they'll get set to -1
+    # in the next bit)
+    ptr[ptr >= len(arr2)] = 0
+    ptr[ptr < 0]          = 0
+
+    # Return -1 where no match is found
+    ptr[where(arr2[ptr] != arr1)[0]] = -1
+    
+    # Put ptr back into original order
+    ptr = where(ptr >= 0, arange(len(arr2), dtype=np.int32)[ptr], -1)
+
+    # count the sum of the boolean array
+    counter = 0
+    for i in range(len(cond)):
+        if cond[i] == True:
+            counter += 1
+
+    # get the indices of the original mt_pid array satisfying the conditions
+    tmp = zeros(counter, dtype=int32)
+    counter = 0
+    for i in range(len(cond)):
+        if cond[i] == True:
+            tmp[counter] = i
+            counter += 1
+    
+    # count how many elements in arr1 have matches in arr2
+    counter = 0
+    for i in range(len(ptr)):
+        if ptr[i] > -1:
+            counter += 1
+
+    # record the common indices
+    comm1 = zeros(counter, dtype=int32)
+    comm2 = zeros(counter, dtype=int32)
+    counter = 0
+    for i in range(len(ptr)):
+        if ptr[i] > -1:
+            comm1[counter] = tmp[i]
+            comm2[counter] = ptr[i]
+            counter += 1
+
+    
+    return comm1, comm2
+
 
 @jit(nopython=True)
 def match_unsrt(arr1, arr2, arr2_sorted=False, arr2_index=None):
