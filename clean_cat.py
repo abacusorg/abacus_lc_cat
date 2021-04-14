@@ -24,8 +24,8 @@ DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
 #DEFAULTS['sim_name'] = "AbacusSummit_huge_c000_ph201"
 #DEFAULTS['catalog_parent'] = "/mnt/gosling1/boryanah/light_cone_catalog/"
 DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
-DEFAULTS['z_start'] = 1.251#0.8#0.350
-DEFAULTS['z_stop'] = 1.251#0.8#1.625
+DEFAULTS['z_start'] = 1.325#0.349#1.251#0.8#0.350
+DEFAULTS['z_stop'] = 1.329#1.63#1.251#0.8#1.625
 
 def save_asdf(table, filename, header, cat_lc_dir):
     """
@@ -352,6 +352,9 @@ def main(sim_name, z_start, z_stop, catalog_parent, want_subsample_B=True):
         
         # record the particles and the halos
         table_halo['npoutA'] = halo_npoutA
+        halo_npstartA = np.zeros(len(halo_npoutA), dtype=table_halo['npstartA'].dtype)
+        halo_npstartA[1:] = np.cumsum(halo_npoutA)[:-1]
+        table_halo['npstartA'] = halo_npstartA
         for key in table_parts.keys():
             table_parts[key] = table_parts[key][parts_inds]
         #table_parts = Table(table_parts)
@@ -372,7 +375,7 @@ def main(sim_name, z_start, z_stop, catalog_parent, want_subsample_B=True):
         # knock out last few digits: 4 bits of the pos, the lowest 12 bits of vel
         table_parts['pos'] = float_trunc(table_parts['pos'], 4)
         table_parts['vel'] = float_trunc(table_parts['vel'], 12)
-        table_parts['redshift'] = float_trunc(table_parts['redshift'], 12)
+        #table_parts['redshift'] = float_trunc(table_parts['redshift'], 12)
 
         # condense the asdf file
         halo_fn_new = cat_lc_dir / ("z%4.3f"%z_current) / ("lc"+str_edges+"_halo_info.asdf")

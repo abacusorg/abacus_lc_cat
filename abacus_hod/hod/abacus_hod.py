@@ -333,8 +333,8 @@ class AbacusHOD:
             Path(self.subsample_dir) / simname / ('z%4.3f'%self.z_mock)
 
         # load header to read parameters
-        halo_info_fns = \
-            list((sim_dir / simname / 'halos' / ('z%4.3f'%self.z_mock) / 'halo_info').glob('*.asdf'))
+        #halo_info_fns = list((sim_dir / simname / 'halos' / ('z%4.3f'%self.z_mock) / 'halo_info').glob('*.asdf'))
+        halo_info_fns = [(sim_dir / simname / 'halos_light_cones' / ('z%4.3f'%self.z_mock) / 'lc_halo_info.asdf')]
         f = asdf.open(halo_info_fns[0], lazy_load=True, copy_arrays=False)
         header = f['header']
 

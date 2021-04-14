@@ -3,6 +3,7 @@ import numpy as np
 import os
 from numba import jit
 from bitpacked import unpack_rvint, unpack_pids
+from tools.compute_dist import dist
 
 def load_lc_pid_rv(lc_pid_fn, lc_rv_fn, Lbox, PPD):
     # load and unpack pids
@@ -86,11 +87,11 @@ def load_mt_cond_edge(halo_mt_fn, Lbox):
     print("load halo mtree file = ", halo_mt_fn)
     f = asdf.open(halo_mt_fn, lazy_load=True, copy_arrays=True)
     mt_pos_yz = f['data']['pos_interp'][:, 1:]
-    cond01 = (mt_pos_yz[:, 1] < Lbox/2.+10.)
-    cond02 = (mt_pos_yz[:, 0] < Lbox/2.+10.)
-    cond10 = (mt_pos_yz[:, 1] > Lbox/2.-10.)
-    cond20 = (mt_pos_yz[:, 0] > Lbox/2.-10.)
-    mt_cond_edge = np.vstack((cond01, cond02, cond10, cond20)).T
+    mt_cond_edge = np.zeros(mt_pos_yz.shape[0], dtype=np.int8)
+    mt_cond_edge[mt_pos_yz[:, 1] < Lbox/2.+10.] += 1
+    mt_cond_edge[mt_pos_yz[:, 0] < Lbox/2.+10.] += 2
+    mt_cond_edge[mt_pos_yz[:, 1] > Lbox/2.-10.] += 4
+    mt_cond_edge[mt_pos_yz[:, 0] > Lbox/2.-10.] += 8
     f.close()
     return mt_cond_edge
 
@@ -100,7 +101,7 @@ def load_mt_dist(halo_mt_fn, origin):
     f = asdf.open(halo_mt_fn, lazy_load=True, copy_arrays=True)
     mt_pos = f['data']['pos_interp']
     f.close()
-    mt_dist = np.sqrt(np.sum((mt_pos - origin)**2, axis=1)).astype(np.float32)
+    mt_dist = dist(mt_pos, origin)
     return mt_dist
 
 @jit(nopython = True)

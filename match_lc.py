@@ -30,8 +30,8 @@ DEFAULTS['light_cone_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacu
 DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
 #DEFAULTS['merger_parent'] = "/mnt/gosling2/bigsims/merger/"
 DEFAULTS['merger_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus/merger"
-DEFAULTS['z_lowest'] = 0.350
-DEFAULTS['z_highest'] = 1.064# 0.991 # TESTING # 1.625
+DEFAULTS['z_lowest'] = 1.287 # 0.350
+DEFAULTS['z_highest'] =  1.370 # 1.625
 
 def get_mt_fns(z_th, zs_mt, chis_mt, cat_lc_dir):
     """
@@ -85,7 +85,7 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
     header = get_one_header(merger_dir)
 
     # physical location of the observer (original box origin)
-    observer_origin = (np.array(header['LightConeOrigins']).reshape(-1,3))[0]
+    observer_origin = (np.array(header['LightConeOrigins'], dtype=np.float32).reshape(-1,3))[0]
     print("observer origin = ", observer_origin)
     
     # simulation parameters
@@ -219,7 +219,7 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
                 # check whether we are resuming and whether this is the redshift last written into the log file
                 if resume and np.abs(currently_loaded_zs[0] - z_last) < 1.e-6:
                     print("This redshift (z = %.3f) has already been recorded, skipping"%z_last)
-                else:
+                else:#elif np.abs(currently_loaded_zs[0] - 1.327) < 1.e-2: #else: # TESTING
                     # save the information about that redshift into asdf file
                     save_asdf(currently_loaded_tables[0], "pid_rv_lc", currently_loaded_headers[0], cat_lc_dir / ("z%4.3f"%currently_loaded_zs[0]))
                     print("saved catalog = ", currently_loaded_zs[0])
@@ -243,26 +243,31 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
             if mt_zs[i] in currently_loaded_zs: print("skipped loading catalog ", mt_zs[i]); continue
             
             # load new merger tree catalog
-            mt_pid, header = load_mt_pid(mt_fns[i], Lbox, PPD)
             halo_mt_npout = load_mt_npout(halo_mt_fns[i])
             if want_subsample_B:
                 halo_mt_npout += load_mt_npout_B(halo_mt_fns[i])
             halo_mt_origin = load_mt_origin(halo_mt_fns[i])
-            halo_mt_cond_edge = load_mt_cond_edge(halo_mt_fns[i], Lbox)
-            halo_mt_dist = load_mt_dist(halo_mt_fns[i], observer_origin)
             mt_origins = np.repeat(halo_mt_origin, halo_mt_npout)
-            mt_cond_edge = np.repeat(halo_mt_cond_edge, halo_mt_npout, axis=0)
-            mt_dist = np.repeat(halo_mt_dist, halo_mt_npout, axis=0)
-            del halo_mt_origin, halo_mt_npout, halo_mt_cond_edge, halo_mt_dist
-            # remove npouts unless applying Lehman's idea
+            del halo_mt_origin
             gc.collect()
+            halo_mt_cond_edge = load_mt_cond_edge(halo_mt_fns[i], Lbox)
+            mt_cond_edge = np.repeat(halo_mt_cond_edge, halo_mt_npout, axis=0)
+            del halo_mt_cond_edge
+            gc.collect()
+            halo_mt_dist = load_mt_dist(halo_mt_fns[i], observer_origin)
+            mt_dist = np.repeat(halo_mt_dist, halo_mt_npout, axis=0)
+            del halo_mt_dist
+            # remove npouts unless applying Lehman's idea
+            del halo_mt_npout
+            gc.collect()
+            mt_pid, header = load_mt_pid(mt_fns[i], Lbox, PPD)
             
             # start the light cones table for this redshift
             lc_table_final = Table(
-                {'pid': np.zeros(len(mt_pid), dtype=mt_pid.dtype),
-                 'pos': np.zeros(len(mt_pid), dtype=(np.float32,3)),
-                 'vel': np.zeros(len(mt_pid), dtype=(np.float32,3)),
-                 #'redshift': np.zeros(len(mt_pid), dtype=np.float16), # TESTING ask Lehman why float16 not allowed
+                {'pid': np.zeros(len(mt_pid), dtype=mt_pid.dtype), # could optimize further by doing empty here, but need to think what pid == 0 means
+                 'pos': np.empty(len(mt_pid), dtype=(np.float32,3)),
+                 'vel': np.empty(len(mt_pid), dtype=(np.float32,3)),
+                 #'redshift': np.zeros(len(mt_pid), dtype=np.float16),
                 }
             )
             
@@ -329,10 +334,8 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
                 # which origins are available for this merger tree file
                 origins = np.unique(mt_origins)
 
-                # add to main function if it works
-                # TESTING adding another condition to reduce the number of particles considered (spatial position of the halos in relation to the particles in the light cone)
+                # adding another condition to reduce the number of particles considered (spatial position of the halos in relation to the particles in the light cone)
                 cond_dist = (mt_dist < chi_this + 10.) & (mt_dist > chi_this - 10.)
-                #cond_dist = np.ones_like(mt_dist, dtype=bool) # TESTING!!!!!!!!!!!!!!!!
                 del mt_dist
                 gc.collect()
                 if np.sum(cond_dist) == 0:
@@ -344,13 +347,13 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
                     if o == origin:
                         condition = mt_origins == o
                     elif origin == 0 and o == 1:
-                        condition = (mt_origins == o) & (mt_cond_edge[:, 0])
+                        condition = (mt_origins == o) & (mt_cond_edge & 1 > 0)
                     elif origin == 0 and o == 2:
-                        condition = (mt_origins == o) & (mt_cond_edge[:, 1])
+                        condition = (mt_origins == o) & (mt_cond_edge & 2 > 0)
                     elif origin == 1 and o == 0:
-                        condition = (mt_origins == o) & (mt_cond_edge[:, 2])
+                        condition = (mt_origins == o) & (mt_cond_edge & 4 > 0)
                     elif origin == 2 and o == 0:
-                        condition = (mt_origins == o) & (mt_cond_edge[:, 3])
+                        condition = (mt_origins == o) & (mt_cond_edge & 8 > 0)
                     elif origin == 1 and o == 2:
                         continue
                     elif origin == 2 and o == 1:
@@ -374,11 +377,10 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
                     del mt_in_lc
                     gc.collect()
                     '''
-                    # TESTING
                     # match merger tree and light cone pids
                     print("starting")
                     t1 = time.time()
-                    comm1, comm2 = match_srt(mt_pid[condition], lc_pid, condition)
+                    comm1, comm2 = match_srt(mt_pid[condition], lc_pid, condition) # can be sped up because mp_pid[condition] creates a copy and same below
                     del condition
                     gc.collect()
                     print("time = ", time.time()-t1)
@@ -414,7 +416,7 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
                     lc_table_final['pid'][comm1] = pid_mt_lc
                     lc_table_final['pos'][comm1] = pos_mt_lc
                     lc_table_final['vel'][comm1] = vel_mt_lc
-                    #lc_table_final['redshift'][comm1] = np.full_like(pid_mt_lc, z_this, dtype=np.float16) # TESTING ask Lehman why float16 not allowed
+                    #lc_table_final['redshift'][comm1] = np.full_like(pid_mt_lc, z_this, dtype=np.float16)
                     del pid_mt_lc, pos_mt_lc, vel_mt_lc, comm1
                     gc.collect()
 
@@ -428,9 +430,10 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
     # close the two that are currently open
     for i in range(len(currently_loaded_zs)):
 
-        # save the information about that redshift into an asdf
-        save_asdf(currently_loaded_tables[0], "pid_rv_lc", currently_loaded_headers[0], cat_lc_dir / ("z%4.3f"%currently_loaded_zs[0]))
-        print("saved catalog = ", currently_loaded_zs[0])
+        if True:#if np.abs(currently_loaded_zs[0] - 1.327) < 1.e-2: # TESTING
+            # save the information about that redshift into an asdf
+            save_asdf(currently_loaded_tables[0], "pid_rv_lc", currently_loaded_headers[0], cat_lc_dir / ("z%4.3f"%currently_loaded_zs[0]))
+            print("saved catalog = ", currently_loaded_zs[0])
 
         # record to the log file
         with open(cat_lc_dir / "tmp" / "match.log", "a") as f:
