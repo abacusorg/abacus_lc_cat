@@ -14,7 +14,7 @@ from numba import njit
 import asdf
 
 from fast_cksum.cksum_io import CksumWriter
-#from tools.aid_asdf import save_asdf
+from tools.compute_dist import dist
 
 # these are probably just for testing; should be removed for production
 DEFAULTS = {}
@@ -139,6 +139,213 @@ def float_trunc(a, zerobits):
         bits &= mask
     return a
 
+def clean_cat(z_current, cat_lc_dir, want_subsample_B):
+    # load the halo light cone catalog
+    halo_fn = cat_lc_dir / ("z%4.3f"%z_current) / "halo_info_lc.asdf"
+    with asdf.open(halo_fn, lazy_load=True, copy_arrays=True) as f:
+        halo_header = f['header']
+        table_halo = f['data']
+
+    # simulation parameters
+    Lbox = halo_header['BoxSize']
+    print("Lbox = ", Lbox)
+
+    # load the particles light cone catalog
+    parts_fn = cat_lc_dir / ("z%4.3f"%z_current) / "pid_rv_lc.asdf"
+    with asdf.open(parts_fn, lazy_load=True, copy_arrays=True) as f:
+        parts_header = f['header']
+        table_parts = f['data']
+
+    # parse the halo positions, npstart, npoutA and halo ids (can reduce data usage with del's)
+    halo_pos = table_halo['pos_interp']
+    halo_index = table_halo['index_halo']
+    halo_npout = table_halo['npoutA']
+    halo_npoutA = halo_npout.copy()
+    if want_subsample_B:
+        halo_npout += table_halo['npoutB']
+        halo_origin = table_halo['origin']
+
+    # parse the particle id's
+    parts_pid = table_parts['pid']
+
+    # if we are removing the edges get rid of halos 10 Mpc/h off the x, y and z edges
+    remove_edges = True
+    if remove_edges:
+        str_edges = ""
+        # find halos that are near the edges
+        offset = 10.
+        x_min = -Lbox/2.+offset
+        x_max = Lbox/2.-offset
+        y_min = -Lbox/2.+offset
+        y_max = 3./2*Lbox # what about when we cross the 1000. boundary
+        z_min = -Lbox/2.+offset
+        z_max = 3./2*Lbox
+
+        # define mask that picks away from the edges
+        halo_mask = (halo_pos[:, 0] >= x_min) & (halo_pos[:, 0] < x_max)
+        halo_mask &= (halo_pos[:, 1] >= y_min) & (halo_pos[:, 1] < y_max)
+        halo_mask &= (halo_pos[:, 2] >= z_min) & (halo_pos[:, 2] < z_max)
+
+        print("spatial masking = ", np.sum(halo_mask)*100./len(halo_mask))
+    else:
+        str_edges = "_all"
+        halo_mask = np.ones(halo_pos.shape[0], dtype=bool)
+
+
+    # figure out how many origins for the given redshifts
+    unique_origins = np.unique(halo_origin)
+    print("unique origins = ", unique_origins)
+
+    # start an empty boolean array which will have "True" for only unique halos
+    halo_mask_extra = np.zeros(halo_pos.shape[0], dtype=bool)
+
+    # origin 1 relates to z direction while origin 2 relates to y direction
+    origin_xyz_dic = {1: 2, 2: 1}
+
+    # add to the halo mask requirement that halos be unique (for a given origin)
+    for origin in unique_origins:
+        # skip the original box
+        if origin == 0: continue
+
+        # boolean array making halos at this origin
+        mask_origin = halo_origin == origin
+
+        # halo indices for this origin
+        halo_inds = np.arange(len(halo_mask), dtype=int)[mask_origin]
+
+        # reorder halos outwards (in order of z for origin 2 and y for origin 1)
+        i_sort = np.argsort((halo_pos[:, origin_xyz_dic[origin]])[halo_inds])
+        halo_inds = halo_inds[i_sort]
+
+        # find unique halo indices (already for specific origins)
+        _, inds = np.unique(halo_index[halo_inds], return_index=True)
+        halo_mask_extra[halo_inds[inds]] = True
+
+        # how many halos were left
+        print("non-unique masking %d = "%origin, len(inds)*100./np.sum(mask_origin))
+
+    # additionally remove halos that are repeated on the borders (0 & 1 and 0 & 2)
+    halo_mask_extra2 = np.zeros(halo_pos.shape[0], dtype=bool)
+
+    for key in origin_xyz_dic.keys():
+
+        # select calos in the original box (cond1) and halos living in box 1 (z < Lbox/2+10.) or box 2 (y < Lbox/2+10.)
+        cond1 = np.arange(len(halo_mask), dtype=int)[halo_origin == 0]
+        cond2 = np.arange(len(halo_mask), dtype=int)[(halo_origin == key) & (halo_pos[:, origin_xyz_dic[key]] < Lbox/2.+offset)]
+
+        # combine the conditions above
+        halo_inds = np.hstack((cond1, cond2))
+        _, inds = np.unique(halo_index[halo_inds], return_index=True)
+
+        # overwrite the information about the halos living in 0 or 1 (z < Lbox/2+10.) and then 0 or 2 (y < Lbox/2+10.)
+        halo_mask_extra[halo_inds] = False
+        halo_mask_extra[halo_inds[inds]] = True
+
+        # how many halos were left
+        print("non-unique masking extra %d = "%key, len(inds)*100./len(halo_inds))
+
+    # add the extra mask coming from the uniqueness requirement
+    halo_mask &= halo_mask_extra        
+
+    # repeat halo mask npout times to get a mask for the particles
+    parts_mask = np.repeat(halo_mask, halo_npout)
+    print("particle masking from halos = ", np.sum(parts_mask)*100./len(parts_mask))
+
+    # halo indices of the particles
+    halo_inds = np.arange(len(halo_mask), dtype=int)
+    parts_halo_inds = np.repeat(halo_inds, halo_npout)
+
+    # number of unique hosts of particles belonging to halos near edges or repeated
+    num_uni_hosts = len(np.unique(parts_halo_inds[parts_mask]))
+    print("unique parts hosts, filtered halos = ", num_uni_hosts, np.sum(halo_mask))
+    assert num_uni_hosts <= np.sum(halo_mask), "number of unique particle hosts must be less than or equal to number of halos in the mask"
+
+    # add to the particle mask, particles whose pid equals 0
+    parts_mask_extra = parts_pid != 0
+    parts_mask &= parts_mask_extra
+    print("pid == 0 masking = ", np.sum(parts_mask_extra)*100./len(parts_mask))
+
+    # filter out the host halo indices of the particles left after removing halos near edges, non-unique halos and particles that were not matched
+    parts_halo_inds = parts_halo_inds[parts_mask]
+
+    # we can now count how many particles were left per halo and indicate the starting index and the count in the npstart and npout (note that this is A and B)
+    uni_halo_inds, inds, counts = np.unique(parts_halo_inds, return_index=True, return_counts=True)
+    print("how many halos' lives did you ruin? = ", num_uni_hosts - len(inds)) # sometimes we would have gotten rid of all particles in a halo (very rare)
+    table_halo['npstartA'][:] = -999
+    table_halo['npoutA'][:] = 0
+    table_halo['npstartA'][uni_halo_inds] = inds
+    table_halo['npoutA'][uni_halo_inds] = counts
+
+    # apply the mask to the particles and to the halos
+    for key in table_parts.keys():
+        table_parts[key] = table_parts[key][parts_mask]
+    for key in table_halo.keys():
+        table_halo[key] = table_halo[key][halo_mask]
+
+    # check for whether the npouts add up to the number of particles; whether we got rid of all pid == 0; whether we got rid of all non-unique halos
+    assert np.sum(table_halo['npoutA']) == len(table_parts['pid']), "different number of particles and npout expectation"
+    assert np.sum(table_parts['pid'] == 0) == 0, "still some particles with pid == 0"
+    for key in origin_xyz_dic.keys():
+        condition = (key == table_halo['origin']) | (0 == table_halo['origin'])
+        assert len(np.unique(table_halo['index_halo'][condition])) == np.sum(condition), "still some non-unique halos left %d vs. %d"%(len(np.unique(table_halo['index_halo'][condition])), np.sum(condition))
+
+    # check for whether the particles stray too far away from their halos
+    parts_pos = table_parts['pos']
+    parts_vel = table_parts['vel']
+    halo_pos = table_halo['pos_interp']
+    parts_halo_pos = np.repeat(halo_pos, table_halo['npoutA'], axis=0)
+    #parts_dist = parts_halo_pos - parts_pos
+    #parts_dist = np.sqrt(np.sum(parts_dist**2, axis=1))
+    parts_dist = dist(parts_halo_pos, parts_pos)
+    print("min dist = ", np.min(parts_dist))
+    print("max dist = ", np.max(parts_dist))
+
+    # adding average velocity and position from subsample A (and B)
+    halo_pos_avg = fast_avg(parts_pos, table_halo['npoutA'])
+    halo_vel_avg = fast_avg(parts_vel, table_halo['npoutA'])
+
+    # scaling down to only record the A subsample
+    halo_npoutA = halo_npoutA[halo_mask]
+    mask_lost = halo_npoutA > table_halo['npoutA']
+    print("halos that now have fewer particles left than the initial subsample A = ", np.sum(mask_lost))
+    halo_npoutA[mask_lost] = table_halo['npoutA'][mask_lost]
+    starts = table_halo['npstartA'].astype(int)
+    stops = starts + halo_npoutA.astype(int)
+    parts_inds = vrange(starts, stops)
+
+    # record the particles and the halos
+    table_halo['npoutA'] = halo_npoutA
+    halo_npstartA = np.zeros(len(halo_npoutA), dtype=table_halo['npstartA'].dtype)
+    halo_npstartA[1:] = np.cumsum(halo_npoutA)[:-1]
+    table_halo['npstartA'] = halo_npstartA
+    for key in table_parts.keys():
+        table_parts[key] = table_parts[key][parts_inds]
+        #table_parts = Table(table_parts)
+
+    # add columns for the averaged position and velocity
+    table_halo = Table(table_halo)
+    table_halo.add_column(np.zeros(halo_pos_avg.shape, dtype=np.float32), copy=False, name='pos_avg')
+    table_halo.add_column(np.zeros(halo_vel_avg.shape, dtype=np.float32), copy=False, name='vel_avg')
+    table_halo['pos_avg'][:] = halo_pos_avg
+    table_halo['vel_avg'][:] = halo_vel_avg
+
+    '''
+    # save asdf without compression or truncation
+    save_asdf(table_parts, "lc"+str_edges+"_pid_rv", parts_header, cat_lc_dir / ("z%4.3f"%z_current))
+    save_asdf(table_halo, "lc"+str_edges+"_halo_info", halo_header, cat_lc_dir / ("z%4.3f"%z_current))
+    '''
+
+    # knock out last few digits: 4 bits of the pos, the lowest 12 bits of vel
+    table_parts['pos'] = float_trunc(table_parts['pos'], 4)
+    table_parts['vel'] = float_trunc(table_parts['vel'], 12)
+    #table_parts['redshift'] = float_trunc(table_parts['redshift'], 12)
+
+    # condense the asdf file
+    halo_fn_new = cat_lc_dir / ("z%4.3f"%z_current) / ("lc"+str_edges+"_halo_info.asdf")
+    compress_asdf(str(halo_fn_new), table_halo, halo_header)
+    parts_fn_new = cat_lc_dir / ("z%4.3f"%z_current) / ("lc"+str_edges+"_pid_rv.asdf")
+    compress_asdf(str(parts_fn_new), table_parts, parts_header)
+
 def main(sim_name, z_start, z_stop, catalog_parent, want_subsample_B=True):
     """
     Main function: this script is for cleaning up the final halo light cone catalogs: in particular, 
@@ -172,218 +379,11 @@ def main(sim_name, z_start, z_stop, catalog_parent, want_subsample_B=True):
         
         # skip the redshift if not between the desired start and stop
         if (z_current < z_start) or (z_current > z_stop): continue
-        
-        # load the halo light cone catalog
-        halo_fn = cat_lc_dir / ("z%4.3f"%z_current) / "halo_info_lc.asdf"
-        with asdf.open(halo_fn, lazy_load=True, copy_arrays=True) as f:
-            halo_header = f['header']
-            table_halo = f['data']
 
-        # simulation parameters
-        Lbox = halo_header['BoxSize']
-        print("Lbox = ", Lbox)
+        # clean the current catalog and save it as a compressed asdf
+        clean_cat(z_current, cat_lc_dir, want_subsample_B)
 
-        # load the particles light cone catalog
-        parts_fn = cat_lc_dir / ("z%4.3f"%z_current) / "pid_rv_lc.asdf"
-        with asdf.open(parts_fn, lazy_load=True, copy_arrays=True) as f:
-            parts_header = f['header']
-            table_parts = f['data']
-
-        # parse the halo positions, npstart, npoutA and halo ids (can reduce data usage with del's)
-        halo_pos = table_halo['pos_interp']
-        halo_x = halo_pos[:, 0]
-        halo_y = halo_pos[:, 1]
-        halo_z = halo_pos[:, 2]
-        halo_index = table_halo['index_halo']
-        halo_npstart = table_halo['npstartA']
-        halo_npout = table_halo['npoutA']
-        halo_npoutA = halo_npout.copy()
-        if want_subsample_B:
-            halo_npout += table_halo['npoutB']
-        halo_origin = table_halo['origin']
-        #halo_index = table_halo['id']
-        
-        # parse the particle id's
-        parts_pid = table_parts['pid']
-
-        # if we are removing the edges get rid of halos 10 Mpc/h off the x, y and z edges
-        remove_edges = True
-        if remove_edges:
-            str_edges = ""
-            # find halos that are near the edges
-            offset = 10.
-            x_min = -Lbox/2.+offset
-            x_max = Lbox/2.-offset
-            y_min = -Lbox/2.+offset
-            y_max = 3./2*Lbox # what about when we cross the 1000. boundary
-            z_min = -Lbox/2.+offset
-            z_max = 3./2*Lbox
-
-            # define mask that picks away from the edges
-            halo_mask = (halo_x >= x_min) & (halo_x < x_max)
-            halo_mask &= (halo_y >= y_min) & (halo_y < y_max)
-            halo_mask &= (halo_z >= z_min) & (halo_z < z_max)
-
-            print("spatial masking = ", np.sum(halo_mask)*100./len(halo_mask))
-        else:
-            str_edges = "_all"
-            halo_mask = np.ones(len(halo_x), dtype=bool)
-        
-
-        # figure out how many origins for the given redshifts
-        unique_origins = np.unique(halo_origin)
-        print("unique origins = ", unique_origins)
-
-        # start an empty boolean array which will have "True" for only unique halos
-        halo_mask_extra = np.zeros(len(halo_x), dtype=bool)
-
-        # origin 1 relates to z direction while origin 2 relates to y direction
-        origin_xyz_dic = {1: 2, 2: 1}
-        
-        # add to the halo mask requirement that halos be unique (for a given origin)
-        for origin in unique_origins:
-            # skip the original box
-            if origin == 0: continue
-            
-            # boolean array making halos at this origin
-            mask_origin = halo_origin == origin
-            
-            # halo indices for this origin
-            halo_inds = np.arange(len(halo_mask), dtype=int)[mask_origin]
-
-            # reorder halos outwards (in order of z for origin 2 and y for origin 1)
-            i_sort = np.argsort((halo_pos[:, origin_xyz_dic[origin]])[halo_inds])
-            halo_inds = halo_inds[i_sort]
-            
-            # find unique halo indices (already for specific origins)
-            _, inds = np.unique(halo_index[halo_inds], return_index=True)
-            halo_mask_extra[halo_inds[inds]] = True
-            
-            # how many halos were left
-            print("non-unique masking %d = "%origin, len(inds)*100./np.sum(mask_origin))
-
-        # additionally remove halos that are repeated on the borders (0 & 1 and 0 & 2)
-        halo_mask_extra2 = np.zeros(len(halo_x), dtype=bool)
-        
-        for key in origin_xyz_dic.keys():
-            
-            # select calos in the original box (cond1) and halos living in box 1 (z < Lbox/2+10.) or box 2 (y < Lbox/2+10.)
-            cond1 = np.arange(len(halo_mask), dtype=int)[halo_origin == 0]
-            cond2 = np.arange(len(halo_mask), dtype=int)[(halo_origin == key) & (halo_pos[:, origin_xyz_dic[key]] < Lbox/2.+offset)]
-
-            # combine the conditions above
-            halo_inds = np.hstack((cond1, cond2))
-            _, inds = np.unique(halo_index[halo_inds], return_index=True)
-
-            # overwrite the information about the halos living in 0 or 1 (z < Lbox/2+10.) and then 0 or 2 (y < Lbox/2+10.)
-            halo_mask_extra[halo_inds] = False
-            halo_mask_extra[halo_inds[inds]] = True
-
-            # how many halos were left
-            print("non-unique masking extra %d = "%key, len(inds)*100./len(halo_inds))
-
-        # add the extra mask coming from the uniqueness requirement
-        halo_mask &= halo_mask_extra        
-
-        # repeat halo mask npout times to get a mask for the particles
-        parts_mask = np.repeat(halo_mask, halo_npout)
-        print("particle masking from halos = ", np.sum(parts_mask)*100./len(parts_mask))
-
-        # halo indices of the particles
-        halo_inds = np.arange(len(halo_mask), dtype=int)
-        parts_halo_inds = np.repeat(halo_inds, halo_npout)
-
-        # number of unique hosts of particles belonging to halos near edges or repeated
-        num_uni_hosts = len(np.unique(parts_halo_inds[parts_mask]))
-        print("unique parts hosts, filtered halos = ", num_uni_hosts, np.sum(halo_mask))
-        assert num_uni_hosts <= np.sum(halo_mask), "number of unique particle hosts must be less than or equal to number of halos in the mask"
-
-        # add to the particle mask, particles whose pid equals 0
-        parts_mask_extra = parts_pid != 0
-        parts_mask &= parts_mask_extra
-        print("pid == 0 masking = ", np.sum(parts_mask_extra)*100./len(parts_mask))
-
-        # filter out the host halo indices of the particles left after removing halos near edges, non-unique halos and particles that were not matched
-        parts_halo_inds = parts_halo_inds[parts_mask]
-
-        # we can now count how many particles were left per halo and indicate the starting index and the count in the npstart and npout (note that this is A and B)
-        uni_halo_inds, inds, counts = np.unique(parts_halo_inds, return_index=True, return_counts=True)
-        print("how many halos' lives did you ruin? = ", num_uni_hosts - len(inds)) # sometimes we would have gotten rid of all particles in a halo (very rare)
-        table_halo['npstartA'][:] = -999
-        table_halo['npoutA'][:] = 0
-        table_halo['npstartA'][uni_halo_inds] = inds
-        table_halo['npoutA'][uni_halo_inds] = counts
-
-        # apply the mask to the particles and to the halos
-        for key in table_parts.keys():
-            table_parts[key] = table_parts[key][parts_mask]
-        for key in table_halo.keys():
-            table_halo[key] = table_halo[key][halo_mask]
-
-        # check for whether the npouts add up to the number of particles; whether we got rid of all pid == 0; whether we got rid of all non-unique halos
-        assert np.sum(table_halo['npoutA']) == len(table_parts['pid']), "different number of particles and npout expectation"
-        assert np.sum(table_parts['pid'] == 0) == 0, "still some particles with pid == 0"
-        for key in origin_xyz_dic.keys():
-            condition = (key == table_halo['origin']) | (0 == table_halo['origin'])
-            assert len(np.unique(table_halo['index_halo'][condition])) == np.sum(condition), "still some non-unique halos left %d vs. %d"%(len(np.unique(table_halo['index_halo'][condition])), np.sum(condition))
-
-        # check for whether the particles stray too far away from their halos
-        parts_pos = table_parts['pos']
-        parts_vel = table_parts['vel']
-        halo_pos = table_halo['pos_interp']
-        parts_halo_pos = np.repeat(halo_pos, table_halo['npoutA'], axis=0)
-        parts_dist = parts_halo_pos - parts_pos
-        parts_dist = np.sqrt(np.sum(parts_dist**2, axis=1))
-        print("min dist = ", np.min(parts_dist))
-        print("max dist = ", np.max(parts_dist))
-
-        # adding average velocity and position from subsample A (and B)
-        halo_pos_avg = fast_avg(parts_pos, table_halo['npoutA'])
-        halo_vel_avg = fast_avg(parts_vel, table_halo['npoutA'])
-
-        # scaling down to only record the A subsample
-        halo_npoutA = halo_npoutA[halo_mask]
-        mask_lost = halo_npoutA > table_halo['npoutA']
-        print("halos that now have fewer particles left than the initial subsample A = ", np.sum(mask_lost))
-        halo_npoutA[mask_lost] = table_halo['npoutA'][mask_lost]
-        starts = table_halo['npstartA'].astype(int)
-        stops = starts + halo_npoutA.astype(int)
-        parts_inds = vrange(starts, stops)
-        
-        # record the particles and the halos
-        table_halo['npoutA'] = halo_npoutA
-        halo_npstartA = np.zeros(len(halo_npoutA), dtype=table_halo['npstartA'].dtype)
-        halo_npstartA[1:] = np.cumsum(halo_npoutA)[:-1]
-        table_halo['npstartA'] = halo_npstartA
-        for key in table_parts.keys():
-            table_parts[key] = table_parts[key][parts_inds]
-        #table_parts = Table(table_parts)
-
-        # add columns for the averaged position and velocity
-        table_halo = Table(table_halo)
-        table_halo.add_column(np.zeros(halo_pos_avg.shape, dtype=np.float32), copy=False, name='pos_avg')
-        table_halo.add_column(np.zeros(halo_vel_avg.shape, dtype=np.float32), copy=False, name='vel_avg')
-        table_halo['pos_avg'][:] = halo_pos_avg
-        table_halo['vel_avg'][:] = halo_vel_avg
-        
-        '''
-        # save asdf without compression or truncation
-        save_asdf(table_parts, "lc"+str_edges+"_pid_rv", parts_header, cat_lc_dir / ("z%4.3f"%z_current))
-        save_asdf(table_halo, "lc"+str_edges+"_halo_info", halo_header, cat_lc_dir / ("z%4.3f"%z_current))
-        '''
-
-        # knock out last few digits: 4 bits of the pos, the lowest 12 bits of vel
-        table_parts['pos'] = float_trunc(table_parts['pos'], 4)
-        table_parts['vel'] = float_trunc(table_parts['vel'], 12)
-        #table_parts['redshift'] = float_trunc(table_parts['redshift'], 12)
-
-        # condense the asdf file
-        halo_fn_new = cat_lc_dir / ("z%4.3f"%z_current) / ("lc"+str_edges+"_halo_info.asdf")
-        compress_asdf(str(halo_fn_new), table_halo, halo_header)
-        parts_fn_new = cat_lc_dir / ("z%4.3f"%z_current) / ("lc"+str_edges+"_pid_rv.asdf")
-        compress_asdf(str(parts_fn_new), table_parts, parts_header)
-
-
+    
 class ArgParseFormatter(argparse.RawDescriptionHelpFormatter, argparse.ArgumentDefaultsHelpFormatter):
     pass
 
