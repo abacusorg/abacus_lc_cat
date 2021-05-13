@@ -32,6 +32,7 @@ DEFAULTS = {}
 #DEFAULTS['sim_name'] = "AbacusSummit_highbase_c021_ph000"
 #DEFAULTS['sim_name'] = "AbacusSummit_highbase_c000_ph100"
 DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
+#DEFAULTS['sim_name'] = "AbacusSummit_base_c123_ph000"
 #DEFAULTS['sim_name'] = "AbacusSummit_huge_c000_ph201"
 #DEFAULTS['compaso_parent'] = "/mnt/gosling2/bigsims"
 DEFAULTS['compaso_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus"
@@ -39,8 +40,8 @@ DEFAULTS['compaso_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus"
 DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
 #DEFAULTS['merger_parent'] = "/mnt/gosling2/bigsims/merger"
 DEFAULTS['merger_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus/merger"
-DEFAULTS['z_start'] = 0.45#0.350
-DEFAULTS['z_stop'] = 0.725#1.625
+DEFAULTS['z_start'] = 1.85#0.1
+DEFAULTS['z_stop'] = 2.5
 CONSTANTS = {'c': 299792.458}  # km/s, speed of light
 
 def extract_redshift(fn):
@@ -108,16 +109,22 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
     chis_all = np.load(Path("data_headers") / sim_name / "coord_dist.npy")
     zs_all[-1] = float("%.1f" % zs_all[-1])  # LHG: I guess this is trying to match up to some filename or something?
 
-    # fields to extract from the CompaSO catalogs
+    # fields to copy directly from the halo_info files
+    raw_dic = {}
     with asdf.open(str(cat_dir / ("z%.3f"%zs_cat[0]) / 'halo_info' / 'halo_info_000.asdf')) as f:
-        print(f.keys())
-        fields_cat = f['data'].keys()
+        for key in f['data'].keys():
+            if 'L2' not in key: continue
+            try:
+                raw_dic[key] = (f['data'][key].dtype, f['data'][key].shape[1])
+            except:
+                raw_dic[key] = f['data'][key].dtype
+        
     # just for testing; remove for final version
     if want_subsample_B:
-        fields_cat = ['id', 'npstartA', 'npoutA', 'npstartB', 'npoutB', 'N', 'x_L2com', 'v_L2com', 'sigmav3d_L2com']
+        fields_cat = ['npstartA', 'npoutA', 'npstartB', 'npoutB', 'N', 'v_L2com']#, 'id', 'x_L2com', 'sigmav3d_L2com', 'r90_L2com', 'r25_L2com']
         subsample_str = 'AB'
     else:
-        fields_cat = ['id', 'npstartA', 'npoutA', 'N', 'x_L2com', 'v_L2com', 'sigmav3d_L2com']
+        fields_cat = ['npstartA', 'npoutA', 'N', 'v_L2com']#, 'x_L2com', 'id', 'sigmav3d_L2com', 'r90_L2com', 'r25_L2com']
         subsample_str = 'A'
     fields_cat_mp = ['haloindex', 'haloindex_mainprog', 'v_L2com_mainprog', 'N_mainprog']
 
@@ -183,7 +190,7 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
                    'LightConeOrigin': ['origin', np.int8],
         }
         
-        # Merger_lc should have all fields (compaso + mainprog + interpolated)        
+        # Merger_lc should have all fields (compaso + mainprog (not anymore) + interpolated)        
         cols = {fields_cat[i]: np.zeros(N_lc, dtype=(user_dt[fields_cat[i]])) for i in range(len(fields_cat))}
         fields = []
         for i in range(len(fields_cat)):
@@ -192,8 +199,12 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
             # I think we don't need the main prog info
             #cols[fields_cat_mp[i]] = np.zeros(N_lc, dtype=(clean_dt_progen[fields_cat_mp[i]]))
             fields.append(fields_cat_mp[i])
+        # additional fields for the light cones
         for key in key_dic.keys():
             cols[key_dic[key][0]] = np.zeros(N_lc, dtype=key_dic[key][1])
+        # adding the raw halo info fields
+        for key in raw_dic.keys():
+            cols[key] = np.zeros(N_lc, dtype=raw_dic[key])
         Merger_lc = Table(cols, copy=False)
 
         # if we want to complete to z = 0, then turn on complete for z = 0.1 (we don't have shells past that)
@@ -230,7 +241,8 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
             for i in [0, 1, -1]:
                 halo_info_list.append(str(catdir / 'halo_info' / ('halo_info_%03d.asdf'%((k+i)%n_superslabs))))
 
-            print(halo_info_list)
+            print("loading halo info files = ", halo_info_list)
+            print("loading fields = ", fields)
             # load the CompaSO catalogs
             if (save_pos or save_z0):
                 try:
@@ -241,8 +253,22 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
                     loaded_pos = False
             else:
                 cat = CompaSOHaloCatalog(halo_info_list, load_subsamples=f'{subsample_str:s}_halo_pid', fields=fields, unpack_bits=False)
+                #cat = CompaSOHaloCatalog(halo_info_list, cleaned_halos=False, load_subsamples=f'{subsample_str:s}_halo_pid', fields=fields, unpack_bits=False)
                 loaded_pos = False
-            
+
+            # load the rest of the parameters in compressed format
+            cols = {}
+            for key in raw_dic.keys():
+                cols[key] = np.zeros(len(cat.halos), dtype=raw_dic[key])
+            compressed_data = Table(cols, copy=False)
+            new_count = 0
+            for i in range(len(halo_info_list)):
+                with asdf.open(halo_info_list[i]) as f:
+                    for key in f['data'].keys():
+                        if key in compressed_data.keys():
+                            compressed_data[key][new_count:new_count+len(f['data'][key])] = f['data'][key][:]
+                    new_count += len(f['data'][key]) 
+
             # loop over each observer origin
             for o in origins_k:
 
@@ -279,13 +305,16 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
                 correction = N_halo_slabs[k] + N_halo_slabs[(k+1)%n_superslabs] + N_halo_slabs[(k-1)%n_superslabs] - N_halo_total
                 halo_ind_lc[halo_ind_lc > N_halo_total - N_halo_slabs[(k-1)%n_superslabs]] += correction
                 
-                # halo table
+                # cut the halos that are not part of this catalog from the halo table
                 halo_table = cat.halos[halo_ind_lc]
+                
                 header = cat.header
                 N_halos = len(cat.halos)
                 print("N_halos = ", N_halos)
                 assert N_halos == N_halo_total+correction, "mismatch between halo number in compaso catalog and in merger tree"
 
+                # cut the halos that are not part of this catalog from the compressed data
+                compressed_data_o = compressed_data[halo_ind_lc]
                 
                 # load eligibility information if it exists
                 if os.path.exists(cat_lc_dir / "tmp" / ("haloindex_z%4.3f_lc%d.%02d.npy"%(z_mt, o, k))):
@@ -393,8 +422,8 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
                 del vel_interp_lc
                 
                 # interpolated mass m = m1 + (m2-m1)/(chi1-chi2)*(chi-chi2)
-                try:
-                    # TESTING
+                if True:#try:
+                    # compute the derivative
                     mdot = (halo_table['N'].astype(float) - halo_table['N_mainprog'][:, 0].astype(float))/(chi_mt_mp - chi_mt)
                     m_star = halo_table['N_mainprog'][:, 0].astype(float) + mdot * (chi_mt_mp - merger_lc['InterpolatedComoving'])
                     # getting rid of negative masses which occur for halos with mass today = 0 or halos that come from the previous redshift (i.e. 1/2 to 1 and not 1 to 3/2)
@@ -402,7 +431,7 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
                     m_star = np.round(m_star).astype(halo_table['N'].dtype)
                     halo_table['N'][mask_info] = m_star[mask_info]
                     del m_star, mdot
-                except:
+                if False:#except:
                     print("failed for some reason")
                     pass
                 
@@ -412,6 +441,10 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
                     if key == 'npstartA' or key == 'npoutA': continue
                     if key == 'npstartB' or key == 'npoutB': continue
                     Merger_lc[key][start:start+num] = halo_table[key][:]
+
+                # copy all L2com compressed fields to Merger_lc
+                for key in compressed_data.keys():
+                    Merger_lc[key][start:start+num] = compressed_data_o[key][:]
                 
                 # save information about halos that were used in this catalog and have merger tree information
                 np.save(cat_lc_dir / "tmp" / ("haloindex_z%4.3f_lc%d.%02d.npy"%(z_mt_mp, o, k)), halo_table['haloindex_mainprog'][mask_info])
@@ -425,8 +458,9 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
             del cat
 
         assert len(Merger_lc['redshift_interp']) == start, "Are you missing some halos?"
-        #chi_interp_lc[chi_interp_lc < np.min(chis_all)] = np.min(chis_all)
-        Merger_lc['redshift_interp'] = z_of_chi(Merger_lc['redshift_interp'])
+        # since at z = 0.1 some of the values are too low
+        Merger_lc['redshift_interp'][Merger_lc['redshift_interp'] < np.min(chis_all)] = np.min(chis_all)
+        Merger_lc['redshift_interp'] = z_of_chi(Merger_lc['redshift_interp']).astype(np.float32)
         
         # save to files
         save_asdf(Merger_lc, "halo_info_lc", header, cat_lc_dir / ("z%4.3f"%z_mt))
@@ -465,6 +499,7 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
         gc.collect()
         
 #dict_keys(['HaloIndex', 'HaloMass', 'HaloVmax', 'IsAssociated', 'IsPotentialSplit', 'MainProgenitor', 'MainProgenitorFrac', 'MainProgenitorPrec', 'MainProgenitorPrecFrac', 'NumProgenitors', 'Position', 'Progenitors'])
+
 
 class ArgParseFormatter(argparse.RawDescriptionHelpFormatter, argparse.ArgumentDefaultsHelpFormatter):
     pass
