@@ -11,7 +11,7 @@ from scipy.interpolate import interp1d
 import argparse
 from astropy.table import Table
 
-from tools.aid_asdf import save_asdf, load_mt_pid, load_mt_cond_edge, load_mt_dist, load_mt_pid_pos_vel, load_mt_npout, load_mt_npout_B, load_lc_pid_rv, load_mt_origin, reindex_pid_pos_vel
+from tools.aid_asdf import save_asdf, load_mt_pid, load_mt_origin_edge, load_mt_dist, load_mt_pid_pos_vel, load_mt_npout, load_mt_npout_B, load_lc_pid_rv, reindex_pid_pos_vel
 from bitpacked import unpack_rvint, unpack_pids
 from tools.merger import get_zs_from_headers, get_one_header
 from tools.read_headers import get_lc_info
@@ -22,7 +22,9 @@ from tools.InputFile import InputFile
 DEFAULTS = {}
 #DEFAULTS['sim_name'] = "AbacusSummit_highbase_c021_ph000"
 #DEFAULTS['sim_name'] = "AbacusSummit_highbase_c000_ph100"
-DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
+#DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
+#DEFAULTS['sim_name'] = "AbacusSummit_base_c123_ph000"
+DEFAULTS['sim_name'] = "AbacusSummit_base_c019_ph000"
 #DEFAULTS['sim_name'] = "AbacusSummit_huge_c000_ph201"
 #DEFAULTS['light_cone_parent'] = "/mnt/gosling2/bigsims/"
 DEFAULTS['light_cone_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus"
@@ -30,8 +32,8 @@ DEFAULTS['light_cone_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacu
 DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
 #DEFAULTS['merger_parent'] = "/mnt/gosling2/bigsims/merger/"
 DEFAULTS['merger_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus/merger"
-DEFAULTS['z_lowest'] = 1.287 # 0.350
-DEFAULTS['z_highest'] =  1.370 # 1.625
+DEFAULTS['z_lowest'] = 0.1
+DEFAULTS['z_highest'] =  2.5
 
 def get_mt_fns(z_th, zs_mt, chis_mt, cat_lc_dir):
     """
@@ -100,15 +102,17 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
     
     # all redshifts, steps and comoving distances of light cones files; high z to low z
     # remove presaving after testing done
-    if not os.path.exists(Path("data_headers") / sim_name / "coord_dist.npy") or not os.path.exists(Path("data_headers") / sim_name / "redshifts.npy") or not os.path.exists(Path("data_headers") / sim_name / "steps.npy"):
-        zs_all, steps, chis_all = get_lc_info("all_headers")
+    if not os.path.exists(Path("data_headers") / sim_name / "coord_dist.npy") or not os.path.exists(Path("data_headers") / sim_name / "redshifts.npy") or not os.path.exists(Path("data_headers") / sim_name / "steps.npy") or not os.path.exists(Path("data_headers") / sim_name / "eta_drift.npy"):
+        zs_all, steps_all, chis_all, etad_all = get_lc_info(Path("all_headers") / sim_name)
         os.makedirs(Path("data_headers") / sim_name, exist_ok=True)
         np.save(Path("data_headers") / sim_name / "redshifts.npy", zs_all)
         np.save(Path("data_headers") / sim_name / "steps.npy", steps_all)
         np.save(Path("data_headers") / sim_name / "coord_dist.npy", chis_all)
+        np.save(Path("data_headers") / sim_name / "eta_drift.npy", etad_all)
     zs_all = np.load(Path("data_headers") / sim_name / "redshifts.npy")
     steps_all = np.load(Path("data_headers") / sim_name / "steps.npy")
     chis_all = np.load(Path("data_headers") / sim_name / "coord_dist.npy")
+    etad_all = np.load(Path("data_headers") / sim_name / "eta_drift.npy")
     zs_all[-1] = float("%.1f" % zs_all[-1])
 
     # if merger tree redshift information has been saved, load it (if not, save it)
@@ -165,8 +169,7 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
     currently_loaded_zs = []
     currently_loaded_headers = []
     currently_loaded_npouts = []
-    currently_loaded_origins = []
-    currently_loaded_pos = []
+    currently_loaded_origin_edge = []
     currently_loaded_dist = []
     currently_loaded_pids = []
     currently_loaded_tables = []
@@ -219,7 +222,7 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
                 # check whether we are resuming and whether this is the redshift last written into the log file
                 if resume and np.abs(currently_loaded_zs[0] - z_last) < 1.e-6:
                     print("This redshift (z = %.3f) has already been recorded, skipping"%z_last)
-                else:#elif np.abs(currently_loaded_zs[0] - 1.327) < 1.e-2: #else: # TESTING
+                else:
                     # save the information about that redshift into asdf file
                     save_asdf(currently_loaded_tables[0], "pid_rv_lc", currently_loaded_headers[0], cat_lc_dir / ("z%4.3f"%currently_loaded_zs[0]))
                     print("saved catalog = ", currently_loaded_zs[0])
@@ -232,8 +235,7 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
                 currently_loaded_zs = currently_loaded_zs[1:]
                 currently_loaded_headers = currently_loaded_headers[1:]
                 currently_loaded_pids = currently_loaded_pids[1:]
-                currently_loaded_origins = currently_loaded_origins[1:]
-                currently_loaded_pos = currently_loaded_pos[1:]
+                currently_loaded_origin_edge = currently_loaded_origin_edge[1:]
                 currently_loaded_dist = currently_loaded_dist[1:]
                 currently_loaded_npouts = currently_loaded_npouts[1:]
                 currently_loaded_tables = currently_loaded_tables[1:]
@@ -246,13 +248,9 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
             halo_mt_npout = load_mt_npout(halo_mt_fns[i])
             if want_subsample_B:
                 halo_mt_npout += load_mt_npout_B(halo_mt_fns[i])
-            halo_mt_origin = load_mt_origin(halo_mt_fns[i])
-            mt_origins = np.repeat(halo_mt_origin, halo_mt_npout)
-            del halo_mt_origin
-            gc.collect()
-            halo_mt_cond_edge = load_mt_cond_edge(halo_mt_fns[i], Lbox)
-            mt_cond_edge = np.repeat(halo_mt_cond_edge, halo_mt_npout, axis=0)
-            del halo_mt_cond_edge
+            halo_mt_origin_edge = load_mt_origin_edge(halo_mt_fns[i], Lbox)
+            mt_origin_edge = np.repeat(halo_mt_origin_edge, halo_mt_npout, axis=0)
+            del halo_mt_origin_edge
             gc.collect()
             halo_mt_dist = load_mt_dist(halo_mt_fns[i], observer_origin)
             mt_dist = np.repeat(halo_mt_dist, halo_mt_npout, axis=0)
@@ -275,9 +273,8 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
             currently_loaded_zs.append(mt_zs[i])
             currently_loaded_headers.append(header)
             currently_loaded_pids.append(mt_pid)
-            currently_loaded_pos.append(mt_cond_edge)
             currently_loaded_dist.append(mt_dist)
-            currently_loaded_origins.append(mt_origins)
+            currently_loaded_origin_edge.append(mt_origin_edge)
             currently_loaded_tables.append(lc_table_final)
             # Useful for Lehman's
             #currently_loaded_npouts.append(halo_mt_npout)
@@ -317,14 +314,12 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
             
             # loop over the one or two closest catalogs 
             for i in range(len(mt_fns)):
-                #if i == 0: continue # TESTING
 
                 # define variables for each of the currently loaded lists
                 which_mt = np.where(mt_zs[i] == currently_loaded_zs)[0]
                 mt_pid = currently_loaded_pids[which_mt[0]]
-                mt_cond_edge = currently_loaded_pos[which_mt[0]]
+                mt_origin_edge = currently_loaded_origin_edge[which_mt[0]]
                 mt_dist = currently_loaded_dist[which_mt[0]]
-                mt_origins = currently_loaded_origins[which_mt[0]]
                 header = currently_loaded_headers[which_mt[0]]
                 lc_table_final = currently_loaded_tables[which_mt[0]]
                 mt_z = currently_loaded_zs[which_mt[0]]
@@ -332,8 +327,9 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
                 #halo_mt_npout = currently_loaded_npouts[which_mt[0]]
                 
                 # which origins are available for this merger tree file
-                origins = np.unique(mt_origins)
-
+                origins = np.unique(np.log2(mt_origin_edge).astype(np.int8) - 4)
+                print("unqiue origins = ", origins)
+                
                 # adding another condition to reduce the number of particles considered (spatial position of the halos in relation to the particles in the light cone)
                 cond_dist = (mt_dist < chi_this + 10.) & (mt_dist > chi_this - 10.)
                 del mt_dist
@@ -345,15 +341,20 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
                 for o in origins:
                     # consider boundary conditions (can probably be sped up if you say if origin 0 and o 1 didn't find anyone, don't check o 0 and o 1, 2
                     if o == origin:
-                        condition = mt_origins == o
+                        #condition = mt_origins == o
+                        condition = mt_origin_edge & 2**(o+4) > 0
                     elif origin == 0 and o == 1:
-                        condition = (mt_origins == o) & (mt_cond_edge & 1 > 0)
+                        #condition = (mt_origins == o) & (mt_cond_edge & 1 > 0)
+                        condition = (mt_origin_edge & 2**(o+4) > 0) & (mt_origin_edge & 1 > 0)
                     elif origin == 0 and o == 2:
-                        condition = (mt_origins == o) & (mt_cond_edge & 2 > 0)
+                        #condition = (mt_origins == o) & (mt_cond_edge & 2 > 0)
+                        condition = (mt_origin_edge & 2**(o+4) > 0) & (mt_origin_edge & 2 > 0)
                     elif origin == 1 and o == 0:
-                        condition = (mt_origins == o) & (mt_cond_edge & 4 > 0)
+                        #condition = (mt_origins == o) & (mt_cond_edge & 4 > 0)
+                        condition = (mt_origin_edge & 2**(o+4) > 0) & (mt_origin_edge & 4 > 0)
                     elif origin == 2 and o == 0:
-                        condition = (mt_origins == o) & (mt_cond_edge & 8 > 0)
+                        #condition = (mt_origins == o) & (mt_cond_edge & 8 > 0)
+                        condition = (mt_origin_edge & 2**(o+4) > 0) & (mt_origin_edge & 8 > 0)
                     elif origin == 1 and o == 2:
                         continue
                     elif origin == 2 and o == 1:
@@ -420,7 +421,7 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
                     del pid_mt_lc, pos_mt_lc, vel_mt_lc, comm1
                     gc.collect()
 
-                del mt_pid, mt_origins, mt_cond_edge, lc_table_final, cond_dist
+                del mt_pid, mt_origin_edge, cond_dist, lc_table_final
                 gc.collect()
 
             print("-------------------")
@@ -429,11 +430,10 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
 
     # close the two that are currently open
     for i in range(len(currently_loaded_zs)):
-
-        if True:#if np.abs(currently_loaded_zs[0] - 1.327) < 1.e-2: # TESTING
-            # save the information about that redshift into an asdf
-            save_asdf(currently_loaded_tables[0], "pid_rv_lc", currently_loaded_headers[0], cat_lc_dir / ("z%4.3f"%currently_loaded_zs[0]))
-            print("saved catalog = ", currently_loaded_zs[0])
+       
+        # save the information about that redshift into an asdf
+        save_asdf(currently_loaded_tables[0], "pid_rv_lc", currently_loaded_headers[0], cat_lc_dir / ("z%4.3f"%currently_loaded_zs[0]))
+        print("saved catalog = ", currently_loaded_zs[0])
 
         # record to the log file
         with open(cat_lc_dir / "tmp" / "match.log", "a") as f:
@@ -443,8 +443,7 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
         currently_loaded_zs = currently_loaded_zs[1:]
         currently_loaded_headers = currently_loaded_headers[1:]
         currently_loaded_pids = currently_loaded_pids[1:]
-        currently_loaded_origins = currently_loaded_origins[1:]
-        currently_loaded_pos = currently_loaded_pos[1:]
+        currently_loaded_origin_edge = currently_loaded_origin_edge[1:]
         currently_loaded_npouts = currently_loaded_npouts[1:]
         currently_loaded_tables = currently_loaded_tables[1:]
         gc.collect()

@@ -20,12 +20,14 @@ from tools.compute_dist import dist
 DEFAULTS = {}
 #DEFAULTS['sim_name'] = "AbacusSummit_highbase_c021_ph000"
 #DEFAULTS['sim_name'] = "AbacusSummit_highbase_c000_ph100"
-DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
+#DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
+#DEFAULTS['sim_name'] = "AbacusSummit_base_c123_ph000"
+DEFAULTS['sim_name'] = "AbacusSummit_base_c019_ph000"
 #DEFAULTS['sim_name'] = "AbacusSummit_huge_c000_ph201"
 #DEFAULTS['catalog_parent'] = "/mnt/gosling1/boryanah/light_cone_catalog/"
 DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
-DEFAULTS['z_start'] = 1.325#0.349#1.251#0.8#0.350
-DEFAULTS['z_stop'] = 1.329#1.63#1.251#0.8#1.625
+DEFAULTS['z_start'] = 0.1
+DEFAULTS['z_stop'] = 2.5
 
 def save_asdf(table, filename, header, cat_lc_dir):
     """
@@ -163,10 +165,7 @@ def clean_cat(z_current, cat_lc_dir, want_subsample_B):
     halo_npoutA = halo_npout.copy()
     if want_subsample_B:
         halo_npout += table_halo['npoutB']
-        halo_origin = table_halo['origin']
-
-    # parse the particle id's
-    parts_pid = table_parts['pid']
+    halo_origin = (table_halo['origin'])%3
 
     # if we are removing the edges get rid of halos 10 Mpc/h off the x, y and z edges
     remove_edges = True
@@ -207,7 +206,7 @@ def clean_cat(z_current, cat_lc_dir, want_subsample_B):
         # skip the original box
         if origin == 0: continue
 
-        # boolean array making halos at this origin
+        # boolean array masking halos at this origin
         mask_origin = halo_origin == origin
 
         # halo indices for this origin
@@ -225,8 +224,6 @@ def clean_cat(z_current, cat_lc_dir, want_subsample_B):
         print("non-unique masking %d = "%origin, len(inds)*100./np.sum(mask_origin))
 
     # additionally remove halos that are repeated on the borders (0 & 1 and 0 & 2)
-    halo_mask_extra2 = np.zeros(halo_pos.shape[0], dtype=bool)
-
     for key in origin_xyz_dic.keys():
 
         # select calos in the original box (cond1) and halos living in box 1 (z < Lbox/2+10.) or box 2 (y < Lbox/2+10.)
@@ -259,12 +256,16 @@ def clean_cat(z_current, cat_lc_dir, want_subsample_B):
     num_uni_hosts = len(np.unique(parts_halo_inds[parts_mask]))
     print("unique parts hosts, filtered halos = ", num_uni_hosts, np.sum(halo_mask))
     assert num_uni_hosts <= np.sum(halo_mask), "number of unique particle hosts must be less than or equal to number of halos in the mask"
-
+    
     # add to the particle mask, particles whose pid equals 0
-    parts_mask_extra = parts_pid != 0
+    parts_mask_extra = table_parts['pid'] != 0
+    perc_before = np.sum(parts_mask)*100./len(parts_mask)
     parts_mask &= parts_mask_extra
-    print("pid == 0 masking = ", np.sum(parts_mask_extra)*100./len(parts_mask))
-
+    perc_after = np.sum(parts_mask)*100./len(parts_mask)
+    print("pid =/= 0 masking all = ", np.sum(parts_mask_extra)*100./len(parts_mask))
+    print("pid == 0 masking w/o edges = ", perc_before-perc_after)
+    
+    
     # filter out the host halo indices of the particles left after removing halos near edges, non-unique halos and particles that were not matched
     parts_halo_inds = parts_halo_inds[parts_mask]
 
@@ -286,23 +287,21 @@ def clean_cat(z_current, cat_lc_dir, want_subsample_B):
     assert np.sum(table_halo['npoutA']) == len(table_parts['pid']), "different number of particles and npout expectation"
     assert np.sum(table_parts['pid'] == 0) == 0, "still some particles with pid == 0"
     for key in origin_xyz_dic.keys():
-        condition = (key == table_halo['origin']) | (0 == table_halo['origin'])
+        condition = (key == (table_halo['origin'])%3) | (0 == (table_halo['origin'])%3)
         assert len(np.unique(table_halo['index_halo'][condition])) == np.sum(condition), "still some non-unique halos left %d vs. %d"%(len(np.unique(table_halo['index_halo'][condition])), np.sum(condition))
 
     # check for whether the particles stray too far away from their halos
-    parts_pos = table_parts['pos']
-    parts_vel = table_parts['vel']
     halo_pos = table_halo['pos_interp']
     parts_halo_pos = np.repeat(halo_pos, table_halo['npoutA'], axis=0)
     #parts_dist = parts_halo_pos - parts_pos
     #parts_dist = np.sqrt(np.sum(parts_dist**2, axis=1))
-    parts_dist = dist(parts_halo_pos, parts_pos)
+    parts_dist = dist(parts_halo_pos, table_parts['pos'])
     print("min dist = ", np.min(parts_dist))
     print("max dist = ", np.max(parts_dist))
 
     # adding average velocity and position from subsample A (and B)
-    halo_pos_avg = fast_avg(parts_pos, table_halo['npoutA'])
-    halo_vel_avg = fast_avg(parts_vel, table_halo['npoutA'])
+    halo_pos_avg = fast_avg(table_parts['pos'], table_halo['npoutA'])
+    halo_vel_avg = fast_avg(table_parts['vel'], table_halo['npoutA'])
 
     # scaling down to only record the A subsample
     halo_npoutA = halo_npoutA[halo_mask]
@@ -329,6 +328,10 @@ def clean_cat(z_current, cat_lc_dir, want_subsample_B):
     table_halo['pos_avg'][:] = halo_pos_avg
     table_halo['vel_avg'][:] = halo_vel_avg
 
+    # remove B subsample references
+    table_halo.remove_column(f'npoutB')
+    table_halo.remove_column(f'npstartB')
+
     '''
     # save asdf without compression or truncation
     save_asdf(table_parts, "lc"+str_edges+"_pid_rv", parts_header, cat_lc_dir / ("z%4.3f"%z_current))
@@ -339,7 +342,7 @@ def clean_cat(z_current, cat_lc_dir, want_subsample_B):
     table_parts['pos'] = float_trunc(table_parts['pos'], 4)
     table_parts['vel'] = float_trunc(table_parts['vel'], 12)
     #table_parts['redshift'] = float_trunc(table_parts['redshift'], 12)
-
+    
     # condense the asdf file
     halo_fn_new = cat_lc_dir / ("z%4.3f"%z_current) / ("lc"+str_edges+"_halo_info.asdf")
     compress_asdf(str(halo_fn_new), table_halo, halo_header)
