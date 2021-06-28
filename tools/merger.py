@@ -137,6 +137,42 @@ def mark_ineligible(nums, starts, main_progs, progs, halo_ind_prev, eligibility_
         eligibility_prev[halo_inds] = False
     return eligibility_prev
 
+def mark_ineligible_extrap(nums, starts, main_progs, progs, halo_ind_prev, eligibility_prev, eligibility_extrap_prev, offsets, slabs_prev_load):
+    # constants used for unpacking
+    id_factor = int(1e12)
+    slab_factor = int(1e9)
+
+    # number of objects marked belonging to this redshift catalog
+    N_this_star_lc = len(nums)
+    # loop around halos that were marked belonging to this redshift catalog
+    for j in range(N_this_star_lc):
+        # select all progenitors
+        start = starts[j]
+        num = nums[j]
+        prog_inds = progs[start : start + num]
+
+        # remove progenitors with no info
+        prog_inds = prog_inds[prog_inds > 0]
+        if len(prog_inds) == 0: continue
+
+        # correct halo indices
+        for k in range(len(prog_inds)):
+            prog_ind = prog_inds[k]
+            idx = (prog_ind % slab_factor)
+            slab_id = ((prog_ind % id_factor - idx) // slab_factor)
+            for i in range(len(slabs_prev_load)):
+                slab_prev_load = slabs_prev_load[i]
+                if slab_id == slab_prev_load:
+                    idx += offsets[i]
+            prog_inds[k] = idx
+        # find halo indices in previous snapshot
+        halo_inds = halo_ind_prev[prog_inds]
+
+        # mark ineligible
+        eligibility_prev[halo_inds] = False
+        eligibility_extrap_prev[halo_inds] = False
+    return eligibility_prev, eligibility_extrap_prev
+
 
 def simple_load(filenames, fields):
     if type(filenames) is str:

@@ -113,6 +113,8 @@ def prepare_slab(i, savedir, simdir, simname, z_mock, tracer_flags, MT, want_ran
         # rename the columns to agree with the rest of the code
         halos['x_L2com'] = halos['pos_interp']
         halos['v_L2com'] = halos['vel_interp']
+        #halos['v_L2com'] = halos['vel_avg'] # use averaged particle positions
+        halos['N'] = halos['N_interp']
         N_halos = len(halos['N'][:])
                 
         # testing: needs to be changed once we copy all halo fields
@@ -179,9 +181,9 @@ def prepare_slab(i, savedir, simdir, simname, z_mock, tracer_flags, MT, want_ran
     print("computing c rank")
     halos_c = halos['r90_L2com']/halos['r25_L2com']
     deltac_rank = np.zeros(N_halos)
-    if light_cones:
-        print("Concentration not implemented!")
-    else:
+    #if light_cones:
+    #    print("Concentration not implemented!")
+    if True:#else:
         for ibin in range(nbins):
             mmask = (halos['N']*Mpart > mbins[ibin]) & (halos['N']*Mpart < mbins[ibin + 1])
             if np.sum(mmask) > 0:
@@ -196,6 +198,8 @@ def prepare_slab(i, savedir, simdir, simname, z_mock, tracer_flags, MT, want_ran
     # the new particle start, len, and multiplier
     halos_pstart = halos['npstartA']
     halos_pnum = halos['npoutA']
+    #halos_pstart = np.zeros(len(halos_pnum), dtype=int)
+    #halos_pstart[1:] = np.cumsum(halos_pnum)[:-1]
     halos_pstart_new = np.zeros(N_halos)
     halos_pnum_new = np.zeros(N_halos)
 
@@ -233,7 +237,8 @@ def prepare_slab(i, savedir, simdir, simname, z_mock, tracer_flags, MT, want_ran
             hvel_parts[halos_pstart[j]: halos_pstart[j] + halos_pnum[j]] = halos['v_L2com'][j]
             Mh_parts[halos_pstart[j]: halos_pstart[j] + halos_pnum[j]] = halos['N'][j] * Mpart # in msun / h
             Np_parts[halos_pstart[j]: halos_pstart[j] + halos_pnum[j]] = np.sum(submask)
-            idh_parts[halos_pstart[j]: halos_pstart[j] + halos_pnum[j]] = halos['id'][j]
+            #idh_parts[halos_pstart[j]: halos_pstart[j] + halos_pnum[j]] = halos['id'][j]
+            idh_parts[halos_pstart[j]: halos_pstart[j] + halos_pnum[j]] = halos['haloindex'][j]
             deltach_parts[halos_pstart[j]: halos_pstart[j] + halos_pnum[j]] = deltac_rank[j]
             fenvh_parts[halos_pstart[j]: halos_pstart[j] + halos_pnum[j]] = fenv_rank[j]
 

@@ -2,7 +2,8 @@ import asdf
 import numpy as np
 import os
 from numba import jit
-from bitpacked import unpack_rvint, unpack_pids
+
+from abacusnbody.data.bitpacked import unpack_rvint, unpack_pids
 from tools.compute_dist import dist
 
 def load_lc_pid_rv(lc_pid_fn, lc_rv_fn, Lbox, PPD):
@@ -62,7 +63,7 @@ def load_mt_origin(halo_mt_fn):
     # load mtree catalog
     print("load halo mtree file = ", halo_mt_fn)
     f = asdf.open(halo_mt_fn, lazy_load=True, copy_arrays=True)
-    mt_origin = f['data']['origin'][:]
+    mt_origin = (f['data']['origin'][:])%3
     f.close()
     return mt_origin
 
@@ -92,6 +93,22 @@ def load_mt_cond_edge(halo_mt_fn, Lbox):
     mt_cond_edge[mt_pos_yz[:, 0] < Lbox/2.+10.] += 2
     mt_cond_edge[mt_pos_yz[:, 1] > Lbox/2.-10.] += 4
     mt_cond_edge[mt_pos_yz[:, 0] > Lbox/2.-10.] += 8
+    f.close()
+    return mt_cond_edge
+
+def load_mt_origin_edge(halo_mt_fn, Lbox):
+    # load mtree catalog
+    print("load halo mtree file = ", halo_mt_fn)
+    f = asdf.open(halo_mt_fn, lazy_load=True, copy_arrays=True)
+    
+    mt_pos_yz = f['data']['pos_interp'][:, 1:]
+    mt_cond_edge = np.zeros(mt_pos_yz.shape[0], dtype=np.int8)
+    mt_cond_edge[mt_pos_yz[:, 1] < Lbox/2.+10.] += 1
+    mt_cond_edge[mt_pos_yz[:, 0] < Lbox/2.+10.] += 2
+    mt_cond_edge[mt_pos_yz[:, 1] > Lbox/2.-10.] += 4
+    mt_cond_edge[mt_pos_yz[:, 0] > Lbox/2.-10.] += 8
+    del mt_pos_yz
+    mt_cond_edge += 2**((f['data']['origin'][:])%3 + 4)
     f.close()
     return mt_cond_edge
 

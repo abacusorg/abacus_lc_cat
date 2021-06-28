@@ -20,8 +20,9 @@ def get_lc_info(header_dir):
     
     # initialize arrays
     redshifts = np.zeros(len(header_fns))
-    steps = np.zeros(len(header_fns),dtype=int)
+    steps = np.zeros(len(header_fns), dtype=int)
     coord_dist = np.zeros(len(header_fns))
+    eta_drift = np.zeros(len(header_fns))
 
     # record needed information from each header
     for i in range(len(header_fns)):
@@ -32,7 +33,9 @@ def get_lc_info(header_dir):
         redshifts[i] = infile.Redshift
         steps[i] = np.int(header_fn.split('Step')[-1])
         coord_dist[i] = infile.CoordinateDistanceHMpc
-    return redshifts, steps, coord_dist
+        eta_drift[i] = infile.etaD
+        
+    return redshifts, steps, coord_dist, eta_drift
 
 
 
@@ -40,13 +43,15 @@ def main():
     # location where all headers for sim are saved
     sim_name = "AbacusSummit_highbase_c021_ph000"
     header_dir = Path("/global/homes/b/boryanah/repos/abacus_lc_cat/all_headers") / sim_name
-    redshifts, steps, coord_dist = get_lc_info(header_dir)
+    redshifts, steps, coord_dist, eta_drift = get_lc_info(header_dir)
 
     print(redshifts)
     print(steps)
     print(coord_dist)
+    print(eta_drift)
     
     np.save("../data_headers/redshifts.npy",redshifts)
     np.save("../data_headers/steps.npy",steps)
     np.save("../data_headers/coord_dist.npy",coord_dist)
+    np.save("../data_headers/eta_drift.npy",eta_drift)
 

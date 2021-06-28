@@ -98,31 +98,38 @@ def get_mt_info(fn_load, fields, minified):
         
     return mt_data
 
-def solve_crossing(r1, r2, pos1, pos2, chi1, chi2, Lbox, origin, complete=False, extra=4., delta_chi_low=None, delta_chi_high=None):
+def solve_crossing(r1, r2, pos1, pos2, chi1, chi2, Lbox, origin, chs, complete=False, extra=4.):
     '''
     Solve when the crossing of the light cones occurs and the
     interpolated position and velocity. Merger trees loook for progenitors in a 4 Mpc/h radius
     '''
-    # if wanting to go down to z = 0
-    if complete:
-        chi_low = 0.
-    else:
-        chi_low = chi2
-    # if provided, means you are going to lower/higher chis to check for missing halos
-    if delta_chi_low is not None:
-        chi_low = chi2 - delta_chi_low / 2.0
-    else:
-        chi_low = chi2
-    if delta_chi_high is not None:
-        chi_high = chi1 + delta_chi_high / 2.0
-    else:
-        chi_high = chi1
 
     # periodic wrapping of the positions of the particles
-    r1, r2, pos1, pos2 = wrapping(r1, r2, pos1, pos2, chi_high, chi_low, Lbox, origin, extra)
+    r1, r2, pos1, pos2 = wrapping(r1, r2, pos1, pos2, chs[1], chs[0], Lbox, origin, extra)
     
-    # assert wrapping worked
-    assert np.all(((r2 <= chi_high) & (r2 > chi_low)) | ((r1 <= chi_high) & (r1 > chi_low))), "Wrapping didn't work"
+    '''
+    # assert wrapping worked # testing here tuks
+    print(r1.dtype, pos2.dtype)
+    r1_old, r2_old, pos1_old, pos2_old = r1.copy(), r2.copy(), pos1.copy(), pos2.copy()
+    r1_new, r2_new, pos1_new, pos2_new = wrapping(r1, r2, pos1, pos2, chs[1], chs[0], Lbox, origin, extra)
+    cond = ((r2_new <= chs[1]) & (r2_new > chs[0])) | ((r1_new <= chs[1]) & (r1_new > chs[0]))
+    print("index = ", np.arange(len(cond))[~cond])
+    print("after wrapping:")
+    print(np.array(pos1_new[~cond]))
+    print(np.array(pos2_new[~cond]))
+    print(np.array(r1_new[~cond]))
+    print(np.array(r2_new[~cond]))
+    print("hi, lo, origin = ", chs[1], chs[0], origin)
+    
+    print(np.array(pos1_old[~cond]))
+    print(np.array(pos2_old[~cond]))
+    print(np.array(r1_old[~cond]))
+    print(np.array(r2_old[~cond]))
+    r1, r2, pos1, pos2 = r1_new, r2_new, pos1_new, pos2_new
+    # end tuks
+    '''
+    
+    assert np.all(((r2 <= chs[1]) & (r2 > chs[0])) | ((r1 <= chs[1]) & (r1 > chs[0]))), "Wrapping didn't work"
 
     # in a very very very very small number of cases (i.e. z = 0.8, corner halos), the current halo position
     # and the main progenitor would both be within chi1 and chi2, but will be on opposite ends. In that case,
@@ -152,7 +159,7 @@ def solve_crossing(r1, r2, pos1, pos2, chi1, chi2, Lbox, origin, complete=False,
     bool_star = np.abs(chi1 - chi_star) > np.abs(chi2 - chi_star)
     
     # condition to check whether halo in this light cone band
-    assert np.all(((chi_star <= chi_high+extra) & (chi_star > chi_low-extra))), "Solution is out of bounds"
+    assert np.all(((chi_star <= chs[1]+extra) & (chi_star > chs[0]-extra))), "Solution is out of bounds"
 
     return chi_star, pos_star, vel_star, bool_star
     
@@ -247,6 +254,8 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, superslab_sta
     ind_start = np.argmin(np.abs(zs_mt - z_start))
     ind_stop = np.argmin(np.abs(zs_mt - z_stop))
 
+    # initialize difference between the conformal time of the previous two catalogs
+    delta_chi_old = 0.
     
     if resume:
         # if user wants to resume from previous state, create padded array for marking whether superslab has been loaded
@@ -257,6 +266,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, superslab_sta
         z_this_tmp = infile.z_prev
         delta_chi_old = infile.delta_chi
         superslab = infile.super_slab
+
         assert (np.abs(zs_mt[ind_start] - z_this_tmp) < 1.0e-6), "Your recorded state is not for the currently requested redshift, can't resume from old. Last recorded state is z = %.3f"%z_this_tmp
         assert (np.abs((superslab_start-1)%n_superslabs - superslab) < 1.0e-6), "Your recorded state is not for the currently requested superslab, can't resume from old. Last recorded state is superslab = %d"%superslab
         with open(cat_lc_dir / "tmp" / "build.log", "a") as f:
@@ -279,11 +289,6 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, superslab_sta
     z2 = z_of_chi((0.5*Lbox-origins[0][0])*np.sqrt(2))
     # furthest point where all three boxes touch
     z3 = z_of_chi((0.5 * Lbox - origins[0][0]) * np.sqrt(3))
-
-    # initialize difference between the conformal time of last two shells
-    # og
-    delta_chi_old = 0.0
-    #delta_chi_old = 138.091
     
     for i in range(ind_start, ind_stop + 1):
 
@@ -438,7 +443,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, superslab_sta
                 eligibility_prev = np.ones(N_halos_prev, dtype=bool)
                 eligibility_extrap_prev = np.ones(N_halos_prev, dtype=bool)
 
-                # TESTING new: only halos without merger tree info are allowed to use the extrap quantities
+                # only halos without merger tree info are allowed to use the extrap quantities; this is relevant if you're doing tuks
                 # mask for eligible halos for light cone origin with and without information
                 mask_noinfo_this = noinfo_this & eligibility_this & eligibility_extrap_this
                 mask_info_this = info_this & eligibility_this
@@ -449,31 +454,25 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, superslab_sta
                 
                 # halos that don't have merger tree information
                 Merger_this_noinfo = Merger_this[mask_noinfo_this].copy()
-
+                
                 # if interpolating to z = 0.1 (kinda ugly way to do this)
                 if complete and np.abs(z_this - 0.1) < 1.e-3:
                     print(f"extending {z_this:4.3f} all the way to z = 0")
                     chi_low = 0.
                 else:
                     chi_low = chi_this
-                    
-                # select objects that are crossing the light cones
-                # og
-                #cond_1 = ((Merger_this_info['ComovingDistance'] > chi_low) & (Merger_this_info['ComovingDistance'] <= chi_prev))
-                #cond_2 = ((Merger_prev_main_this_info['ComovingDistance'] > chi_low) & (Merger_prev_main_this_info['ComovingDistance'] <= chi_prev))
-                # TESTING
-                cond_1 = ((Merger_this_info['ComovingDistance'] > chi_low - delta_chi_old / 2.0) & (Merger_this_info['ComovingDistance'] <= chi_prev))
-                cond_2 = ((Merger_prev_main_this_info['ComovingDistance'] > chi_low - delta_chi_old / 2.0) & (Merger_prev_main_this_info['ComovingDistance'] <= chi_prev))
-                # TESTING weirder idea
-                #cond_1 = ((Merger_this_info['ComovingDistance'] > chi_low - delta_chi_old / 2.0) & (Merger_this_info['ComovingDistance'] <= chi_prev + delta_chi_new / 2.0))
-                #cond_2 = ((Merger_prev_main_this_info['ComovingDistance'] > chi_low - delta_chi_old / 2.0) & (Merger_prev_main_this_info['ComovingDistance'] <= chi_prev + delta_chi_new / 2.0))
 
+                # select objects that are crossing the light cones
+                #chs = np.array([chi_low, chi_prev], dtype=np.float32) # og
+                chs = np.array([chi_low - delta_chi_old / 2.0, chi_prev], dtype=np.float32) # TESTING
+                #chs = np.array([chi_low - delta_chi_old / 2.0, chi_prev + delta_chi_new / 2.0], dtype=np.float32) # TESTING weirder idea
+                cond_1 = ((Merger_this_info['ComovingDistance'] > chs[0]) & (Merger_this_info['ComovingDistance'] <= chs[1]))
+                cond_2 = ((Merger_prev_main_this_info['ComovingDistance'] > chs[0]) & (Merger_prev_main_this_info['ComovingDistance'] <= chs[1]))                
                 mask_lc_this_info = cond_1 | cond_2
                 del cond_1, cond_2
 
                 # for halos that have no merger tree information, we simply take their current position
                 # og
-                
                 cond_1 = (Merger_this_noinfo['ComovingDistance'] > chi_low - delta_chi_old / 2.0)
                 cond_2 = (Merger_this_noinfo['ComovingDistance'] <= chi_low + delta_chi / 2.0)
                 
@@ -499,7 +498,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, superslab_sta
                 # select halos with mt info that have had a light cone crossing
                 Merger_this_info_lc = Merger_this_info[mask_lc_this_info]
                 Merger_prev_main_this_info_lc = Merger_prev_main_this_info[mask_lc_this_info]
-
+                
                 if plot:
                     
                     x_min = -Lbox/2.+k*(Lbox/n_superslabs)
@@ -557,9 +556,8 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, superslab_sta
                     chi_this,
                     Lbox,
                     origin,
+                    chs,
                     complete=(complete and np.abs(z_this - 0.1) < 1.e-3),
-                    delta_chi_low=delta_chi_old, # TESTING newest
-                    delta_chi_high=None#delta_chi_new # TESTING newest weirder
                 )
 
                 
@@ -579,7 +577,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, superslab_sta
                         Merger_next = Table(Merger_next)
                         N_next_lc = len(Merger_next['HaloIndex'])
                         
-                        # TESTING to-append and extrapolated from before; to-append and interpolated now; can be done less expensively
+                        # tmp1: to-append and extrapolated from before; tmp2: to-append and interpolated now; get rid od these; TODO: can be done less expensively
                         tmp1 = np.in1d(Merger_next['HaloIndex'][:], pack_inds(Merger_this['HaloIndex'][~eligibility_extrap_this], k))
                         tmp2 = np.in1d(Merger_next['HaloIndex'][:], pack_inds(Merger_this_info_lc['HaloIndex'][:], k))
                         tmp3 = ~(tmp1 & tmp2)

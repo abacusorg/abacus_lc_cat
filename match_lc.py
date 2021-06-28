@@ -12,7 +12,8 @@ import argparse
 from astropy.table import Table
 
 from tools.aid_asdf import save_asdf, load_mt_pid, load_mt_origin_edge, load_mt_dist, load_mt_pid_pos_vel, load_mt_npout, load_mt_npout_B, load_lc_pid_rv, reindex_pid_pos_vel
-from bitpacked import unpack_rvint, unpack_pids
+
+from abacusnbody.data.bitpacked import unpack_rvint, unpack_pids
 from tools.merger import get_zs_from_headers, get_one_header
 from tools.read_headers import get_lc_info
 from tools.match_searchsorted import match, match_srt, match_halo_pids_to_lc_rvint

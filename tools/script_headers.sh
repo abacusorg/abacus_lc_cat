@@ -2,6 +2,7 @@ head_dir="/global/homes/b/boryanah/repos/abacus_lc_cat/all_headers"
 sim_names="sim_names.txt"
 script="headers.sh"
 sim_dir="/global/project/projectdirs/desi/cosmosim/Abacus/"
+rm "$script"
 echo -n "mkdir ${head_dir}; cd ${head_dir}" >> "$script"
 echo "" >> "$script"
 while IFS= read -r line; do

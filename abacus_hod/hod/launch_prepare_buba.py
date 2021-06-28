@@ -41,7 +41,7 @@ print("redshifts = ",redshifts)
 
 # loop through all available redshifts
 for z_mock in redshifts:
-    #if z_mock != 0.8: continue
+    #if z_mock != 0.5: continue
     # location to save the subsampled halos and particles
     savedir = f'/global/cscratch1/sd/boryanah/AbacusHOD_scratch/'+simname+f'/z{z_mock:4.3f}/'
     os.makedirs(savedir, exist_ok=True)

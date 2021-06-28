@@ -17,8 +17,8 @@ import numpy as np
 import argparse
 
 #from abacusnbody.hod.abacus_hod import AbacusHOD
-sys.path.append('..')
-from hod.abacus_hod import AbacusHOD
+sys.path.append('../..')
+from abacus_hod.hod.abacus_hod import AbacusHOD
 
 DEFAULTS = {}
 DEFAULTS['path2config'] = 'config/buba.yaml'
@@ -87,6 +87,8 @@ def main(path2config):
     for i in range(len(redshifts)):
         # this redshift
         redshift = redshifts[i]
+
+        #if redshift != 0.5: continue
         
         # modify redshift in sim_params tuks
         sim_params['z_mock'] = redshift

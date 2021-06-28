@@ -230,6 +230,9 @@ def clean_cat(z_current, cat_lc_dir, want_subsample_B):
         cond1 = np.arange(len(halo_mask), dtype=int)[halo_origin == 0]
         cond2 = np.arange(len(halo_mask), dtype=int)[(halo_origin == key) & (halo_pos[:, origin_xyz_dic[key]] < Lbox/2.+offset)]
 
+        # forget about this if there are no halos with origin = 0
+        if np.sum(cond1) == 0: continue
+
         # combine the conditions above
         halo_inds = np.hstack((cond1, cond2))
         _, inds = np.unique(halo_index[halo_inds], return_index=True)
@@ -241,6 +244,7 @@ def clean_cat(z_current, cat_lc_dir, want_subsample_B):
         # how many halos were left
         print("non-unique masking extra %d = "%key, len(inds)*100./len(halo_inds))
 
+        
     # add the extra mask coming from the uniqueness requirement
     halo_mask &= halo_mask_extra        
 
@@ -256,7 +260,7 @@ def clean_cat(z_current, cat_lc_dir, want_subsample_B):
     num_uni_hosts = len(np.unique(parts_halo_inds[parts_mask]))
     print("unique parts hosts, filtered halos = ", num_uni_hosts, np.sum(halo_mask))
     assert num_uni_hosts <= np.sum(halo_mask), "number of unique particle hosts must be less than or equal to number of halos in the mask"
-    
+
     # add to the particle mask, particles whose pid equals 0
     parts_mask_extra = table_parts['pid'] != 0
     perc_before = np.sum(parts_mask)*100./len(parts_mask)
@@ -264,7 +268,6 @@ def clean_cat(z_current, cat_lc_dir, want_subsample_B):
     perc_after = np.sum(parts_mask)*100./len(parts_mask)
     print("pid =/= 0 masking all = ", np.sum(parts_mask_extra)*100./len(parts_mask))
     print("pid == 0 masking w/o edges = ", perc_before-perc_after)
-    
     
     # filter out the host halo indices of the particles left after removing halos near edges, non-unique halos and particles that were not matched
     parts_halo_inds = parts_halo_inds[parts_mask]
@@ -373,6 +376,7 @@ def main(sim_name, z_start, z_stop, catalog_parent, want_subsample_B=True):
 
     # list all available redshifts
     sim_slices = sorted(cat_lc_dir.glob('z*'))
+    
     redshifts = [extract_redshift(sim_slices[i]) for i in range(len(sim_slices))]
     print("redshifts = ",redshifts)
 

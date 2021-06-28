@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt
 import argparse
 from astropy.table import Table
 
-from abacusnbody.data.compaso_halo_catalog import CompaSOHaloCatalog, user_dt, clean_dt_progen
+from abacusnbody.data.compaso_halo_catalog import CompaSOHaloCatalog, user_dt#, clean_dt_progen
 from tools.aid_asdf import save_asdf, reindex_pid, reindex_pid_pos_vel, reindex_pid_pos_vel_AB, reindex_pid_AB
 from tools.read_headers import get_lc_info
 from tools.merger import simple_load, get_halos_per_slab, get_zs_from_headers, get_halos_per_slab_origin, extract_superslab, extract_superslab_minified, unpack_inds
@@ -37,8 +37,8 @@ DEFAULTS['sim_name'] = "AbacusSummit_base_c019_ph000"
 #DEFAULTS['sim_name'] = "AbacusSummit_base_c123_ph000"
 #DEFAULTS['sim_name'] = "AbacusSummit_huge_c000_ph201"
 #DEFAULTS['compaso_parent'] = "/mnt/gosling2/bigsims"
-DEFAULTS['compaso_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus"
-#DEFAULTS['compaso_parent'] = "/global/cscratch1/sd/sbose/subsample_B_particles"
+DEFAULTS['compaso_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus"  
+#DEFAULTS['compaso_parent'] = "/global/cscratch1/sd/sbose/subsample_B_particles" # mai nikoga
 #DEFAULTS['catalog_parent'] = "/mnt/gosling1/boryanah/light_cone_catalog/"
 DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
 #DEFAULTS['merger_parent'] = "/mnt/gosling2/bigsims/merger"
@@ -74,6 +74,9 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
 
     # directory where the CompaSO halo catalogs are saved
     cat_dir = compaso_parent / sim_name / "halos"
+    # TESTING sega switch
+    clean_dir = compaso_parent / "cleaning" / sim_name # og
+    #clean_dir = compaso_parent / "cleaned_halos" / sim_name
     
     # obtain the redshifts of the CompaSO catalogs
     redshifts = glob.glob(os.path.join(cat_dir,"z*"))
@@ -114,7 +117,7 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
     chis_all = np.load(Path("data_headers") / sim_name / "coord_dist.npy")
     etad_all = np.load(Path("data_headers") / sim_name / "eta_drift.npy")
     zs_all[-1] = float("%.1f" % zs_all[-1])  # LHG: I guess this is trying to match up to some filename or something?
-
+    
     # fields to copy directly from the halo_info files
     raw_dic = {}
     with asdf.open(str(cat_dir / ("z%.3f"%zs_cat[0]) / 'halo_info' / 'halo_info_000.asdf')) as f:
@@ -123,8 +126,11 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
             try:
                 raw_dic[key] = (f['data'][key].dtype, f['data'][key].shape[1])
             except:
-                raw_dic[key] = f['data'][key].dtype
+                raw_dic[key] = f['data'][key].dtype                
+                
         
+
+                
     # just for testing; remove for final version
     if want_subsample_B:
         fields_cat = ['npstartA', 'npoutA', 'npstartB', 'npoutB', 'N', 'v_L2com', 'x_L2com']#, 'id', 'x_L2com', 'sigmav3d_L2com', 'r90_L2com', 'r25_L2com']
@@ -132,8 +138,11 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
     else:
         fields_cat = ['npstartA', 'npoutA', 'N', 'v_L2com', 'x_L2com']#, 'id', 'sigmav3d_L2com', 'r90_L2com', 'r25_L2com']
         subsample_str = 'A'
+
+    # main progenitor fields of interest
     fields_cat_mp = ['haloindex', 'haloindex_mainprog', 'v_L2com_mainprog', 'N_mainprog']
 
+    
     # get functions relating chi and z
     chi_of_z = interp1d(zs_all, chis_all)
     etad_of_chi = interp1d(chis_all,etad_all)
@@ -202,13 +211,22 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
         fields = []
         for i in range(len(fields_cat)):
             fields.append(fields_cat[i])
-        for i in range(len(fields_cat_mp)):
-            # I think we don't need the main prog info
-            #cols[fields_cat_mp[i]] = np.zeros(N_lc, dtype=(clean_dt_progen[fields_cat_mp[i]]))
-            fields.append(fields_cat_mp[i])
+
         # additional fields for the light cones
         for key in key_dic.keys():
             cols[key_dic[key][0]] = np.zeros(N_lc, dtype=key_dic[key][1])
+
+        # updating the mainprog here
+        # TESTING sega switch
+        #with asdf.open(str(clean_dir / 'halos' / ("z%.3f"%z_cat) / 'cleaned_halo_info_000.asdf')) as f:
+        with asdf.open(str(clean_dir / ("z%.3f"%z_cat) / 'cleaned_halo_info' / 'cleaned_halo_info_000.asdf')) as f: # og
+            # add mainprog stuff to the raw dictionary
+            for key in fields_cat_mp:
+                try:
+                    raw_dic[key] = (f['data'][key].dtype, f['data'][key].shape[1])
+                except:
+                    raw_dic[key] = f['data'][key].dtype
+
         # adding the raw halo info fields
         for key in raw_dic.keys():
             cols[key] = np.zeros(N_lc, dtype=raw_dic[key])
@@ -248,8 +266,16 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
             # list of halo indices
             halo_info_list = []
             for i in [0, 1, -1]:
-                halo_info_list.append(str(catdir / 'halo_info' / ('halo_info_%03d.asdf'%((k+i)%n_superslabs))))
-
+                # TESTING sega switch
+                #halo_info_list.append(str(catdir / 'halo_info' / ('halo_info_%03d.asdf'%((k+i)%n_superslabs)))) # og vij dolu # ako chastitsite ne sa na mainata si
+                halo_info_list.append(str(Path("/global/cscratch1/sd/sbose/subsample_B_particles") / sim_name / "halos"/ ("z%.3f"%z_cat) / 'halo_info' / ('halo_info_%03d.asdf'%((k+i)%n_superslabs)))) # tova e po-razlichno i se polzva kogato e cleaning/cleaned_halos (t.e. chasticite sa na mainata si)
+            # adding merger tree fields
+            cleaned_halo_info_list = []
+            for i in [0, 1, -1]:
+                # TESTING sega switch cleaning/AbacusSummit_base_c000_ph006/z0.100/cleaned_halo_info/cleaned_halo_info_000.asdf
+                cleaned_halo_info_list.append(str(clean_dir / ("z%.3f"%z_cat) / 'cleaned_halo_info' / ('cleaned_halo_info_%03d.asdf'%((k+i)%n_superslabs)))) # og
+                #cleaned_halo_info_list.append(str(clean_dir / 'halos' / ("z%.3f"%z_cat) / ('cleaned_halo_info_%03d.asdf'%((k+i)%n_superslabs))))
+                
             print("loading halo info files = ", halo_info_list)
             print("loading fields = ", fields)
             # load the CompaSO catalogs
@@ -275,6 +301,14 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
                 with asdf.open(halo_info_list[i]) as f:
                     for key in f['data'].keys():
                         if key in compressed_data.keys():
+                            compressed_data[key][new_count:new_count+len(f['data'][key])] = f['data'][key][:]
+                    new_count += len(f['data'][key])
+            # adding merger tree fields
+            new_count = 0
+            for i in range(len(cleaned_halo_info_list)):
+                with asdf.open(cleaned_halo_info_list[i]) as f:
+                    for key in f['data'].keys():
+                        if key in fields_cat_mp:
                             compressed_data[key][new_count:new_count+len(f['data'][key])] = f['data'][key][:]
                     new_count += len(f['data'][key]) 
 
@@ -330,7 +364,7 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
                     haloindex_ineligible = np.load(cat_lc_dir / "tmp" / ("haloindex_z%4.3f_lc%d.%02d.npy"%(z_mt, o, k)))
 
                     # find the halos in halo_table that have been marked ineligible and get rid of them
-                    mask_ineligible = np.in1d(halo_table['haloindex'], haloindex_ineligible)
+                    mask_ineligible = np.in1d(compressed_data_o['haloindex'], haloindex_ineligible)
                     # decided this is bad cause of the particle indexing or rather the halo indexing that uses num and then the total number of particles
                     #halo_table = halo_table[mask_ineligible]
                     halo_table['N'][mask_ineligible] = 0
@@ -411,7 +445,7 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
                 vel_interp_lc[not_interp] = halo_table['v_L2com'][not_interp]
                 
                 # halos with merger tree info (0 for merged or smol, -999 for no info)
-                mask_info = halo_table['haloindex_mainprog'] > 0
+                mask_info = compressed_data_o['haloindex_mainprog'][:] > 0
                 print("percentage without merger tree info = ", 100.*(1. - np.sum(mask_info)/len(mask_info)))
                 print("percentage of removed halos = ", np.sum(halo_table['N'] == 0) * 100./len(mask_info))
                 # I think that it may be possible that because in later redshifts (not z_start of build_mt),
@@ -422,8 +456,8 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
                 del not_interp
                 
                 # interpolated velocity v = v1 + (v2-v1)/(chi1-chi2)*(chi-chi2) because -d(chi) = d(eta)
-                a_avg = (halo_table['v_L2com'] - halo_table['v_L2com_mainprog'])/(chi_mt_mp - chi_mt)
-                v_star = halo_table['v_L2com_mainprog'] + a_avg * (chi_mt_mp - merger_lc['InterpolatedComoving'][:, None])
+                a_avg = (halo_table['v_L2com'] - compressed_data_o['v_L2com_mainprog'])/(chi_mt_mp - chi_mt)
+                v_star = compressed_data_o['v_L2com_mainprog'] + a_avg * (chi_mt_mp - merger_lc['InterpolatedComoving'][:, None])
                 vel_interp_lc[mask_info] = v_star[mask_info]
                 del a_avg, v_star
                 
@@ -433,38 +467,32 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
                 del vel_interp_lc
                 
                 # interpolated mass m = m1 + (m2-m1)/(chi1-chi2)*(chi-chi2) because dt = -dchi
-                if True:#try:
-                    # compute the derivative
-                    mdot = (halo_table['N'].astype(float) - halo_table['N_mainprog'][:, 0].astype(float))/(chi_mt_mp - chi_mt)
-                    m_star = halo_table['N_mainprog'][:, 0].astype(float) + mdot * (chi_mt_mp - merger_lc['InterpolatedComoving'])
-                    # getting rid of negative masses which occur for halos with mass today = 0 or halos that come from the previous redshift (i.e. 1/2 to 1 and not 1 to 3/2)
-                    m_star[m_star < 0.] = 0.
-                    m_star = np.round(m_star).astype(halo_table['N'].dtype)
-                    # record the interpolated mass for each halo
-                    Merger_lc['N_interp'][start:start+num][mask_info] = m_star[mask_info]
+                # compute the derivative
+                mdot = (halo_table['N'].astype(float) - compressed_data_o['N_mainprog'][:, 0].astype(float))/(chi_mt_mp - chi_mt)
+                m_star = compressed_data_o['N_mainprog'][:, 0].astype(float) + mdot * (chi_mt_mp - merger_lc['InterpolatedComoving'])
+                # getting rid of negative masses which occur for halos with mass today = 0 or halos that come from the previous redshift (i.e. 1/2 to 1 and not 1 to 3/2)
+                m_star[m_star < 0.] = 0.
+                m_star = np.round(m_star).astype(halo_table['N'].dtype)
+                # record the interpolated mass for each halo
+                Merger_lc['N_interp'][start:start+num][mask_info] = m_star[mask_info]
 
-                    # mark the halos that don't have merger tree info
-                    Merger_lc['origin'][start:start+num][~mask_info] += 3
-                    
-                    # for these halos, we can pseudo interpolate their position but keep the mass unchanged
-                    Merger_lc['N_interp'][start:start+num][~mask_info] = halo_table['N'][~mask_info]
-                    # buba's try
-                    #Merger_lc['pos_interp'][start:start+num][~mask_info] = merger_lc['InterpolatedPosition'][~mask_info]# + halo_table['v_L2com'][~mask_info]*(chi_mt - merger_lc['InterpolatedComoving'][:, None])[~mask_info]
-                    # lehman's recommendation:
-                    # thinking about this as a simulation particle with canonical velocity v1 drifting from z1 to z2, advance the position as: x2 = x1 + v1*(etaD(z2) - etaD(z1)). The eta_Ds are the drift factors, computed as \Delta etaD = \int_t1^t2 dt/a^2 and are stored in the state headers.  So I think you can just use that.  The only trick is to get the velocity from output units (comoving RSD) back to code units (canonical velocity), which can be accomplished with VelZSpace_to_Canonical in the header.  Note x1 and x2 have to be unit-box comoving coords.
-                    tmp = (merger_lc['InterpolatedComoving'][~mask_info])
-                    tmp[tmp < np.min(chis_all)] = np.min(chis_all)
-                    merger_lc['InterpolatedComoving'][~mask_info] = tmp
-                    del tmp
-                    Merger_lc['pos_interp'][start:start+num][~mask_info] = (merger_lc['InterpolatedPosition'][~mask_info]/header['BoxSizeHMpc'] + compressed_data_o['v_L2com'][~mask_info]*header['VelZSpace_to_Canonical']*(etad_of_chi(merger_lc['InterpolatedComoving'][~mask_info, None]) - etad_of_chi(chi_mt)))*header['BoxSizeHMpc']
-                    # + halo_table['v_L2com'][~mask_info]*(chi_mt - merger_lc['InterpolatedComoving'][:, None])[~mask_info]                    
-                    
-                    # BUG units TESTING
-                    del m_star, mdot
-                if False:#except:
-                    print("failed for some reason")
-                    Merger_lc['N_interp'][start:start+num] = halo_table['N']
-                    pass
+                # mark the halos that don't have merger tree info
+                Merger_lc['origin'][start:start+num][~mask_info] += 3
+
+                # for these halos, we can pseudo interpolate their position but keep the mass unchanged
+                Merger_lc['N_interp'][start:start+num][~mask_info] = halo_table['N'][~mask_info]
+                # buba's try
+                #Merger_lc['pos_interp'][start:start+num][~mask_info] = merger_lc['InterpolatedPosition'][~mask_info]# + halo_table['v_L2com'][~mask_info]*(chi_mt - merger_lc['InterpolatedComoving'][:, None])[~mask_info]
+                # simulation particle with canonical velocity v1 drifting from z1 to z2, advance the position as: x2 = x1 + v1*(etaD(z2) - etaD(z1)). The eta_Ds are the drift factors, computed as \Delta etaD = \int_t1^t2 dt/a^2 and are stored in the state headers, with velocities in canonical units, and x1 and x2 in unit-box comoving coords.
+                tmp = (merger_lc['InterpolatedComoving'][~mask_info])
+                tmp[tmp < np.min(chis_all)] = np.min(chis_all)
+                merger_lc['InterpolatedComoving'][~mask_info] = tmp
+                del tmp
+                Merger_lc['pos_interp'][start:start+num][~mask_info] = (merger_lc['InterpolatedPosition'][~mask_info]/header['BoxSizeHMpc'] + compressed_data_o['v_L2com'][~mask_info]*header['VelZSpace_to_Canonical']*(etad_of_chi(merger_lc['InterpolatedComoving'][~mask_info, None]) - etad_of_chi(chi_mt)))*header['BoxSizeHMpc']
+                # + halo_table['v_L2com'][~mask_info]*(chi_mt - merger_lc['InterpolatedComoving'][:, None])[~mask_info]                    
+
+                # units -- todo: test
+                del m_star, mdot
                 
                 # copy the rest of the halo fields
                 for key in fields_cat:
@@ -479,7 +507,7 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
 
 
                 # save information about halos that were used in this catalog and have merger tree information
-                np.save(cat_lc_dir / "tmp" / ("haloindex_z%4.3f_lc%d.%02d.npy"%(z_mt_mp, o, k)), halo_table['haloindex_mainprog'][mask_info])
+                np.save(cat_lc_dir / "tmp" / ("haloindex_z%4.3f_lc%d.%02d.npy"%(z_mt_mp, o, k)), compressed_data_o['haloindex_mainprog'][mask_info])
                 del mask_info
                 del halo_table
                 

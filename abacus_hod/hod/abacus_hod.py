@@ -427,8 +427,9 @@ class AbacusHOD:
             maskedhalos = newfile['halos']
 
             # extracting the halo properties that we need
-            halo_ids = maskedhalos["id"].astype(int) # halo IDs
             halo_pos = maskedhalos["x_L2com"] # halo positions, Mpc / h
+            #halo_ids = maskedhalos["id"].astype(int) # halo IDs
+            halo_ids = maskedhalos["haloindex"].astype(int) # halo IDs
             halo_vels = maskedhalos['v_L2com'] # halo velocities, km/s
             halo_vel_dev = maskedhalos["randoms_gaus_vrms"] # halo velocity dispersions, km/s
             halo_mass = maskedhalos['N']*params['Mpart'] # halo mass, Msun / h, 200b
