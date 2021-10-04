@@ -71,7 +71,7 @@ def main(path2config):
         redshift = redshifts[i]
 
         # use the same HOD model for lower redshifts
-        if redshift <= 0.726:
+        if redshift <= 0.725:
             HOD_dicts.append(fid_dic)
             continue
 

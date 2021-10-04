@@ -41,7 +41,8 @@ def get_lc_info(header_dir):
 
 def main():
     # location where all headers for sim are saved
-    sim_name = "AbacusSummit_highbase_c021_ph000"
+    #sim_name = "AbacusSummit_highbase_c021_ph000"
+    sim_name = "AbacusSummit_huge_c000_ph202"
     header_dir = Path("/global/homes/b/boryanah/repos/abacus_lc_cat/all_headers") / sim_name
     redshifts, steps, coord_dist, eta_drift = get_lc_info(header_dir)
 
@@ -49,9 +50,8 @@ def main():
     print(steps)
     print(coord_dist)
     print(eta_drift)
-    
-    np.save("../data_headers/redshifts.npy",redshifts)
-    np.save("../data_headers/steps.npy",steps)
-    np.save("../data_headers/coord_dist.npy",coord_dist)
-    np.save("../data_headers/eta_drift.npy",eta_drift)
 
+    np.save(f"../data_headers/{sim_name:s}/redshifts.npy",redshifts)
+    np.save(f"../data_headers/{sim_name:s}/steps.npy",steps)
+    np.save(f"../data_headers/{sim_name:s}/coord_dist.npy",coord_dist)
+    np.save(f"../data_headers/{sim_name:s}/eta_drift.npy",eta_drift)

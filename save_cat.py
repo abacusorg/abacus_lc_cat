@@ -30,22 +30,15 @@ from tools.merger import simple_load, get_halos_per_slab, get_zs_from_headers, g
 
 # these are probably just for testing; should be removed for production
 DEFAULTS = {}
-#DEFAULTS['sim_name'] = "AbacusSummit_highbase_c021_ph000"
-#DEFAULTS['sim_name'] = "AbacusSummit_highbase_c000_ph100"
-#DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
-DEFAULTS['sim_name'] = "AbacusSummit_base_c019_ph000"
-#DEFAULTS['sim_name'] = "AbacusSummit_base_c123_ph000"
-#DEFAULTS['sim_name'] = "AbacusSummit_huge_c000_ph201"
-#DEFAULTS['compaso_parent'] = "/mnt/gosling2/bigsims"
-DEFAULTS['compaso_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus"  
+DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
+DEFAULTS['compaso_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus" # standard
+#DEFAULTS['compaso_parent'] = "/global/cscratch1/sd/boryanah/data_hybrid/tape_data" # if sownak deletes the particles mai nikoga
 #DEFAULTS['compaso_parent'] = "/global/cscratch1/sd/sbose/subsample_B_particles" # mai nikoga
-#DEFAULTS['catalog_parent'] = "/mnt/gosling1/boryanah/light_cone_catalog/"
-DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
-#DEFAULTS['merger_parent'] = "/mnt/gosling2/bigsims/merger"
+#DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
+DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/new_lc_halos/"
 DEFAULTS['merger_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus/merger"
 DEFAULTS['z_start'] = 0.1
 DEFAULTS['z_stop'] = 2.5
-CONSTANTS = {'c': 299792.458}  # km/s, speed of light
 
 def extract_redshift(fn):
     fn = str(fn)
@@ -74,16 +67,14 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
 
     # directory where the CompaSO halo catalogs are saved
     cat_dir = compaso_parent / sim_name / "halos"
-    # TESTING sega switch
-    clean_dir = compaso_parent / "cleaning" / sim_name # og
-    #clean_dir = compaso_parent / "cleaned_halos" / sim_name
+    clean_dir = compaso_parent / "cleaning" / sim_name
     
     # obtain the redshifts of the CompaSO catalogs
     redshifts = glob.glob(os.path.join(cat_dir,"z*"))
     zs_cat = [extract_redshift(redshifts[i]) for i in range(len(redshifts))]
     
     # directory where we save the final outputs
-    cat_lc_dir = catalog_parent / sim_name / "halos_light_cones"
+    cat_lc_dir = catalog_parent / "halo_light_cones" / sim_name
 
     # directory where the merger tree files are kept
     merger_dir = merger_parent / sim_name
@@ -127,7 +118,7 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
                 raw_dic[key] = (f['data'][key].dtype, f['data'][key].shape[1])
             except:
                 raw_dic[key] = f['data'][key].dtype                
-                
+        header = f['header'] # just for getting the name of the redshift
         
 
                 
@@ -169,6 +160,9 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
         z_cat = zs_cat[np.argmin(np.abs(z_mt-zs_cat))]
         print("Redshift = %.3f %.3f"%(z_mt,z_cat))
 
+        # the names of the folders need to be standardized
+        zname_mt = min(header['L1OutputRedshifts'], key=lambda z: abs(z - z_mt))
+        
         # convert the redshifts into comoving distance
         chi_mt = chi_of_z(z_mt)
         chi_mt_mp = chi_of_z(z_mt_mp)
@@ -186,7 +180,7 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
         N_halo_total = np.sum(N_halo_slabs)
         
         # names of the light cone merger tree file for this redshift
-        merger_lc_fns = list((cat_lc_dir / ("z%.3f"%z_mt)).glob("Merger_lc*.asdf"))
+        merger_lc_fns = list((cat_lc_dir / ("z%.3f"%zname_mt)).glob("Merger_lc*.asdf"))
         for counter in range(len(merger_lc_fns)):
             merger_lc_fns[counter] = str(merger_lc_fns[counter])
 
@@ -217,8 +211,6 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
             cols[key_dic[key][0]] = np.zeros(N_lc, dtype=key_dic[key][1])
 
         # updating the mainprog here
-        # TESTING sega switch
-        #with asdf.open(str(clean_dir / 'halos' / ("z%.3f"%z_cat) / 'cleaned_halo_info_000.asdf')) as f:
         with asdf.open(str(clean_dir / ("z%.3f"%z_cat) / 'cleaned_halo_info' / 'cleaned_halo_info_000.asdf')) as f: # og
             # add mainprog stuff to the raw dictionary
             for key in fields_cat_mp:
@@ -266,15 +258,14 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
             # list of halo indices
             halo_info_list = []
             for i in [0, 1, -1]:
-                # TESTING sega switch
-                #halo_info_list.append(str(catdir / 'halo_info' / ('halo_info_%03d.asdf'%((k+i)%n_superslabs)))) # og vij dolu # ako chastitsite ne sa na mainata si
-                halo_info_list.append(str(Path("/global/cscratch1/sd/sbose/subsample_B_particles") / sim_name / "halos"/ ("z%.3f"%z_cat) / 'halo_info' / ('halo_info_%03d.asdf'%((k+i)%n_superslabs)))) # tova e po-razlichno i se polzva kogato e cleaning/cleaned_halos (t.e. chasticite sa na mainata si)
+                # TESTING depending on whether B particles are in normal location or sownak's or mine
+                #halo_info_list.append(str(catdir / 'halo_info' / ('halo_info_%03d.asdf'%((k+i)%n_superslabs)))) # og
+                #halo_info_list.append(str(Path("/global/cscratch1/sd/sbose/subsample_B_particles") / sim_name / "halos"/ ("z%.3f"%z_cat) / 'halo_info' / ('halo_info_%03d.asdf'%((k+i)%n_superslabs)))) # tova e po-razlichno i se polzva kogato e cleaning/cleaned_halos (t.e. chasticite sa na mainata si)
+                halo_info_list.append(str(Path("/global/cscratch1/sd/boryanah/data_hybrid/tape_data") / sim_name / "halos"/ ("z%.3f"%z_cat) / 'halo_info' / ('halo_info_%03d.asdf'%((k+i)%n_superslabs)))) # ako sownak si iztrie tupite chastici
             # adding merger tree fields
             cleaned_halo_info_list = []
             for i in [0, 1, -1]:
-                # TESTING sega switch cleaning/AbacusSummit_base_c000_ph006/z0.100/cleaned_halo_info/cleaned_halo_info_000.asdf
-                cleaned_halo_info_list.append(str(clean_dir / ("z%.3f"%z_cat) / 'cleaned_halo_info' / ('cleaned_halo_info_%03d.asdf'%((k+i)%n_superslabs)))) # og
-                #cleaned_halo_info_list.append(str(clean_dir / 'halos' / ("z%.3f"%z_cat) / ('cleaned_halo_info_%03d.asdf'%((k+i)%n_superslabs))))
+                cleaned_halo_info_list.append(str(clean_dir / ("z%.3f"%z_cat) / 'cleaned_halo_info' / ('cleaned_halo_info_%03d.asdf'%((k+i)%n_superslabs))))
                 
             print("loading halo info files = ", halo_info_list)
             print("loading fields = ", fields)
@@ -287,8 +278,8 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
                     cat = CompaSOHaloCatalog(halo_info_list, load_subsamples=f'{subsample_str:s}_halo_pid', fields=fields, unpack_bits=False)
                     loaded_pos = False
             else:
-                cat = CompaSOHaloCatalog(halo_info_list, load_subsamples=f'{subsample_str:s}_halo_pid', fields=fields, unpack_bits=False)
-                #cat = CompaSOHaloCatalog(halo_info_list, cleaned_halos=False, load_subsamples=f'{subsample_str:s}_halo_pid', fields=fields, unpack_bits=False)
+                cat = CompaSOHaloCatalog(halo_info_list, load_subsamples=f'{subsample_str:s}_halo_pid', fields=fields, unpack_bits=False, cleandir=str(compaso_parent / "cleaning"))
+                #cat = CompaSOHaloCatalog(halo_info_list, load_subsamples=f'{subsample_str:s}_halo_pid', fields=fields, unpack_bits=False, cleaned=False)
                 loaded_pos = False
 
             # load the rest of the parameters in compressed format
@@ -324,7 +315,7 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
                 if num == 0: continue
                 
                 # load the light cone arrays
-                with asdf.open(cat_lc_dir / ("z%.3f"%z_mt) / ("Merger_lc%d.%02d.asdf"%(o,k)), lazy_load=True, copy_arrays=True) as f:
+                with asdf.open(cat_lc_dir / ("z%.3f"%zname_mt) / ("Merger_lc%d.%02d.asdf"%(o,k)), lazy_load=True, copy_arrays=True) as f:
                     merger_lc = f['data']
 
                 # the files should be congruent
@@ -365,6 +356,7 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
 
                     # find the halos in halo_table that have been marked ineligible and get rid of them
                     mask_ineligible = np.in1d(compressed_data_o['haloindex'], haloindex_ineligible)
+
                     # decided this is bad cause of the particle indexing or rather the halo indexing that uses num and then the total number of particles
                     #halo_table = halo_table[mask_ineligible]
                     halo_table['N'][mask_ineligible] = 0
@@ -434,9 +426,8 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
                     pid_table = Table({'pid': np.zeros(len(pid_new), pid_new.dtype)})
                     pid_table['pid'] = pid_new
                     del pid_new
-
                 # save the particles
-                save_asdf(pid_table, "pid_lc%d.%02d"%(o,k), header, cat_lc_dir / ("z%4.3f"%z_mt))
+                save_asdf(pid_table, "pid_lc%d.%02d"%(o,k), header, cat_lc_dir / ("z%4.3f"%zname_mt))
                 del pid_table
                 
                 # for halos that did not have interpolation and get the velocity from the halo info files
@@ -468,8 +459,14 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
                 
                 # interpolated mass m = m1 + (m2-m1)/(chi1-chi2)*(chi-chi2) because dt = -dchi
                 # compute the derivative
-                mdot = (halo_table['N'].astype(float) - compressed_data_o['N_mainprog'][:, 0].astype(float))/(chi_mt_mp - chi_mt)
-                m_star = compressed_data_o['N_mainprog'][:, 0].astype(float) + mdot * (chi_mt_mp - merger_lc['InterpolatedComoving'])
+                try:
+                    mdot = (halo_table['N'].astype(float) - compressed_data_o['N_mainprog'][:, 0].astype(float))/(chi_mt_mp - chi_mt)
+                    m_star = compressed_data_o['N_mainprog'][:, 0].astype(float) + mdot * (chi_mt_mp - merger_lc['InterpolatedComoving'])
+                except:
+                    # this is only needed if you are using the last available redshift for which N_mainprog is 1D
+                    mdot = (halo_table['N'].astype(float) - compressed_data_o['N_mainprog'].astype(float))/(chi_mt_mp - chi_mt)
+                    m_star = compressed_data_o['N_mainprog'].astype(float) + mdot * (chi_mt_mp - merger_lc['InterpolatedComoving'])
+                    
                 # getting rid of negative masses which occur for halos with mass today = 0 or halos that come from the previous redshift (i.e. 1/2 to 1 and not 1 to 3/2)
                 m_star[m_star < 0.] = 0.
                 m_star = np.round(m_star).astype(halo_table['N'].dtype)
@@ -524,7 +521,7 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
         Merger_lc['redshift_interp'] = z_of_chi(Merger_lc['redshift_interp']).astype(np.float32)
         
         # save to files
-        save_asdf(Merger_lc, "halo_info_lc", header, cat_lc_dir / ("z%4.3f"%z_mt))
+        save_asdf(Merger_lc, "halo_info_lc", header, cat_lc_dir / ("z%4.3f"%zname_mt))
         del Merger_lc
 
         # loop over each superslab
@@ -537,7 +534,7 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
             # loop over each observer origin
             for o in origins_k:
                 
-                with asdf.open(cat_lc_dir / ("z%4.3f"%z_mt) / ("pid_lc%d.%02d.asdf"%(o,k)), lazy_load=True, copy_arrays=True) as f:
+                with asdf.open(cat_lc_dir / ("z%4.3f"%zname_mt) / ("pid_lc%d.%02d.asdf"%(o,k)), lazy_load=True, copy_arrays=True) as f:
                     pid_lc = f['data']['pid'][:]
                     if (save_pos or save_z0) and loaded_pos:
                         pos_lc = f['data']['pos'][:]
@@ -555,7 +552,7 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
                 file_no += 1
                 offset += len(pid_lc)
         assert offset == count, "Missing particles somewhere"
-        save_asdf(pid_table, "pid_lc", header, cat_lc_dir / ("z%4.3f"%z_mt))
+        save_asdf(pid_table, "pid_lc", header, cat_lc_dir / ("z%4.3f"%zname_mt))
 
         gc.collect()
         

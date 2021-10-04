@@ -99,39 +99,46 @@ def prepare_slab(i, savedir, simdir, simname, z_mock, tracer_flags, MT, want_ran
 
     # load the halo catalog slab
     print("loading halo catalog ")
-
+    if light_cones:
+        fields = ['N', 'N_interp', 'x_L2com', 'v_L2com', 'pos_interp', 'vel_interp', 'npstartA', 'npoutA', 'haloindex', 'sigmav3d_L2com']
+    else:
+        fields = ['N', 'x_L2com', 'v_L2com', 'r90_L2com', 'r25_L2com', 'npstartA', 'npoutA', 'id', 'sigmav3d_L2com']
+    
     if light_cones:
         assert light_cones_dir != '', "You haven't specified light cone directory"
         # halo table filename
-        halos_fn = os.path.join(light_cones_dir, simname, 'halos_light_cones', f'z{z_mock:4.3f}', 'lc_halo_info.asdf')
-
+        halos_fn = os.path.join(light_cones_dir, 'halo_light_cones', simname, f'z{z_mock:4.3f}', 'lc_halo_info.asdf')
+        
         # open the halo file
         with asdf.open(halos_fn, lazy_load=True, copy_arrays=True) as f:
             halos = f['data']
             header = f['header']
+            cols = {col:np.array(halos[col]) for col in fields}
+        halos = Table(cols, copy=False)
 
         # rename the columns to agree with the rest of the code
         halos['x_L2com'] = halos['pos_interp']
         halos['v_L2com'] = halos['vel_interp']
+        halos['id'] = halos['haloindex']
         #halos['v_L2com'] = halos['vel_avg'] # use averaged particle positions
         halos['N'] = halos['N_interp']
-        N_halos = len(halos['N'][:])
+        N_halos = len(halos['N'])
                 
         # testing: needs to be changed once we copy all halo fields
         halos['r25_L2com'] = np.ones(N_halos)
         halos['r90_L2com'] = np.ones(N_halos)
 
         # load the particles
-        with asdf.open(os.path.join(light_cones_dir, simname, 'halos_light_cones', f'z{z_mock:4.3f}', 'lc_pid_rv.asdf'), lazy_load=True, copy_arrays=True) as f:
+        with asdf.open(os.path.join(light_cones_dir, 'halo_light_cones', simname, f'z{z_mock:4.3f}', 'lc_pid_rv.asdf'), lazy_load=True, copy_arrays=True) as f:
             parts = f['data']
             header = f['header']
-
+            cols = {col:np.array(parts[col]) for col in ['pos', 'vel']}
+        parts = Table(cols, copy=False)
     else:
         slabname = simdir+simname+'/halos/z'+str(z_mock).ljust(5, '0')\
         +'/halo_info/halo_info_'+str(i).zfill(3)+'.asdf'
 
-        cat = CompaSOHaloCatalog(slabname, subsamples=dict(A=True, rv=True), fields = ['N', 
-            'x_L2com', 'v_L2com', 'r90_L2com', 'r25_L2com', 'npstartA', 'npoutA', 'id', 'sigmav3d_L2com'], 
+        cat = CompaSOHaloCatalog(slabname, subsamples=dict(A=True, rv=True), fields = fields, 
             cleaned_halos = cleaning)
         halos = cat.halos
         if cleaning:
@@ -237,8 +244,7 @@ def prepare_slab(i, savedir, simdir, simname, z_mock, tracer_flags, MT, want_ran
             hvel_parts[halos_pstart[j]: halos_pstart[j] + halos_pnum[j]] = halos['v_L2com'][j]
             Mh_parts[halos_pstart[j]: halos_pstart[j] + halos_pnum[j]] = halos['N'][j] * Mpart # in msun / h
             Np_parts[halos_pstart[j]: halos_pstart[j] + halos_pnum[j]] = np.sum(submask)
-            #idh_parts[halos_pstart[j]: halos_pstart[j] + halos_pnum[j]] = halos['id'][j]
-            idh_parts[halos_pstart[j]: halos_pstart[j] + halos_pnum[j]] = halos['haloindex'][j]
+            idh_parts[halos_pstart[j]: halos_pstart[j] + halos_pnum[j]] = halos['id'][j] 
             deltach_parts[halos_pstart[j]: halos_pstart[j] + halos_pnum[j]] = deltac_rank[j]
             fenvh_parts[halos_pstart[j]: halos_pstart[j] + halos_pnum[j]] = fenv_rank[j]
 
@@ -364,10 +370,6 @@ def prepare_slab(i, savedir, simdir, simname, z_mock, tracer_flags, MT, want_ran
     parts['randoms'] = np.random.random(N_parts)
     parts['halo_deltac'] = deltach_parts[mask_parts]
     parts['halo_fenv'] = fenvh_parts[mask_parts]
-
-    if light_cones:
-        print("IF THE WORLD DOESN'T BURN DELETE ME")
-        #parts = Table(parts)
     
     print("are there any negative particle values? ", np.sum(parts['downsample_halo'] < 0), 
         np.sum(parts['halo_mass'] < 0))

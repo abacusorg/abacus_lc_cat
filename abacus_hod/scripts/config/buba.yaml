@@ -7,7 +7,8 @@ sim_params:
     sim_name: 'AbacusSummit_base_c000_ph006'                                 # which simulation
 #    sim_dir: '/mnt/gosling2/bigsims/'                                        # where is the simulation
 #    sim_dir: '/global/project/projectdirs/desi/cosmosim/Abacus/'             # where is the simulation
-    sim_dir: '/global/cscratch1/sd/boryanah/light_cone_catalog/'             # where is the simulation
+#    sim_dir: '/global/cscratch1/sd/boryanah/light_cone_catalog/'             # where is the simulation
+    sim_dir: '/global/cscratch1/sd/boryanah/new_lc_halos/'             # where is the simulation
 #    output_dir: '/mnt/gosling1/boryanah/AbacusHOD_scratch/mocks/'           # where to output galaxy mocks
     output_dir: '/global/cscratch1/sd/boryanah/AbacusHOD_scratch/mocks/'     # where to output galaxy mocks
 #    subsample_dir: '/mnt/gosling1/boryanah/AbacusHOD_scratch/'               # where to output subsample data
@@ -36,7 +37,7 @@ HOD_params:
         LRG: False 
         ELG: True
         QSO: False
-    want_rsd: False                 # want RSD? 
+    want_rsd: True                 # want RSD? 
     write_to_disk: True
 
     # parameters for setting up the HOD of LRGs

@@ -6,6 +6,11 @@ from numba import jit
 from abacusnbody.data.bitpacked import unpack_rvint, unpack_pids
 from tools.compute_dist import dist
 
+# og
+pos_key = 'pos_interp'
+# TESTING
+#pos_key = 'x_L2com'
+
 def load_lc_pid_rv(lc_pid_fn, lc_rv_fn, Lbox, PPD):
     # load and unpack pids
     lc_pids = asdf.open(lc_pid_fn, lazy_load=True, copy_arrays=True)
@@ -71,7 +76,7 @@ def load_mt_pos(halo_mt_fn):
     # load mtree catalog
     print("load halo mtree file = ", halo_mt_fn)
     f = asdf.open(halo_mt_fn, lazy_load=True, copy_arrays=True)
-    mt_pos = f['data']['pos_interp'][:]
+    mt_pos = f['data'][pos_key][:]
     f.close()
     return mt_pos
 
@@ -79,7 +84,7 @@ def load_mt_pos_yz(halo_mt_fn):
     # load mtree catalog
     print("load halo mtree file = ", halo_mt_fn)
     f = asdf.open(halo_mt_fn, lazy_load=True, copy_arrays=True)
-    mt_pos_yz = f['data']['pos_interp'][:, 1:].astype(np.float16)
+    mt_pos_yz = f['data'][pos_key][:, 1:].astype(np.float16)
     f.close()
     return mt_pos_yz
 
@@ -87,7 +92,7 @@ def load_mt_cond_edge(halo_mt_fn, Lbox):
     # load mtree catalog
     print("load halo mtree file = ", halo_mt_fn)
     f = asdf.open(halo_mt_fn, lazy_load=True, copy_arrays=True)
-    mt_pos_yz = f['data']['pos_interp'][:, 1:]
+    mt_pos_yz = f['data'][pos_key][:, 1:]
     mt_cond_edge = np.zeros(mt_pos_yz.shape[0], dtype=np.int8)
     mt_cond_edge[mt_pos_yz[:, 1] < Lbox/2.+10.] += 1
     mt_cond_edge[mt_pos_yz[:, 0] < Lbox/2.+10.] += 2
@@ -101,7 +106,7 @@ def load_mt_origin_edge(halo_mt_fn, Lbox):
     print("load halo mtree file = ", halo_mt_fn)
     f = asdf.open(halo_mt_fn, lazy_load=True, copy_arrays=True)
     
-    mt_pos_yz = f['data']['pos_interp'][:, 1:]
+    mt_pos_yz = f['data'][pos_key][:, 1:]
     mt_cond_edge = np.zeros(mt_pos_yz.shape[0], dtype=np.int8)
     mt_cond_edge[mt_pos_yz[:, 1] < Lbox/2.+10.] += 1
     mt_cond_edge[mt_pos_yz[:, 0] < Lbox/2.+10.] += 2
@@ -116,7 +121,7 @@ def load_mt_dist(halo_mt_fn, origin):
     # load mtree catalog
     print("load halo mtree file = ", halo_mt_fn)
     f = asdf.open(halo_mt_fn, lazy_load=True, copy_arrays=True)
-    mt_pos = f['data']['pos_interp']
+    mt_pos = f['data'][pos_key]
     f.close()
     mt_dist = dist(mt_pos, origin)
     return mt_dist

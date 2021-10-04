@@ -8,7 +8,8 @@ from prepare_buba import prepare_slab
 # simulation and light cones specs
 simname = 'AbacusSummit_base_c000_ph006'
 #light_cones_dir = '/mnt/gosling1/boryanah/light_cone_catalog/'
-light_cones_dir = '/global/cscratch1/sd/boryanah/light_cone_catalog/'
+#light_cones_dir = '/global/cscratch1/sd/boryanah/light_cone_catalog/'
+light_cones_dir = '/global/cscratch1/sd/boryanah/new_lc_halos/'
 num_slabs = 1
 
 tracer_flags = {'LRG': True, 'ELG': True, 'QSO': True}
@@ -34,7 +35,8 @@ def extract_redshift(fn):
     return red
 
 # random seeds
-cat_lc_dir = os.path.join(light_cones_dir, simname, 'halos_light_cones')
+#cat_lc_dir = os.path.join(light_cones_dir, simname, 'halos_light_cones')
+cat_lc_dir = os.path.join(light_cones_dir, 'halo_light_cones', simname)
 sim_slices = sorted(glob.glob(os.path.join(cat_lc_dir,'z*')))
 redshifts = [extract_redshift(sim_slices[i]) for i in range(len(sim_slices))]
 print("redshifts = ",redshifts)

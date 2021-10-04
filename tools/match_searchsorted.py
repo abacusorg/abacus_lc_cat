@@ -2,6 +2,11 @@
 
 from numpy import *
 from numba import jit
+import numpy as np
+
+# og
+dtype = np.int32
+#dtype = np.int64 # needed for huge box ph201
 
 @jit(nopython=True)
 def match(arr1, arr2, arr2_sorted=False, arr2_index=None):
@@ -66,7 +71,7 @@ def match_reduced(arr1, arr2):
     """
 
     # Find where elements of arr1 are in arr2
-    ptr = zeros(len(arr1), dtype=np.int32)
+    ptr = zeros(len(arr1), dtype=dtype)
     ptr[:] = searchsorted(arr2, arr1)
 
     # Make sure all elements in ptr are valid indexes into arr2
@@ -79,7 +84,7 @@ def match_reduced(arr1, arr2):
     ptr[where(arr2[ptr] != arr1)[0]] = -1
     
     # Put ptr back into original order
-    ptr = where(ptr >= 0, arange(len(arr2), dtype=np.int32)[ptr], -1)
+    ptr = where(ptr >= 0, arange(len(arr2), dtype=dtype)[ptr], -1)
 
     return ptr
 
@@ -94,7 +99,7 @@ def match_srt(arr1, arr2, cond):
     """
 
     # Find where elements of arr1 are in arr2
-    ptr = zeros(len(arr1), dtype=np.int32)
+    ptr = zeros(len(arr1), dtype=dtype)
     ptr[:] = searchsorted(arr2, arr1)
 
     # Make sure all elements in ptr are valid indexes into arr2
@@ -107,7 +112,7 @@ def match_srt(arr1, arr2, cond):
     ptr[where(arr2[ptr] != arr1)[0]] = -1
     
     # Put ptr back into original order
-    ptr = where(ptr >= 0, arange(len(arr2), dtype=np.int32)[ptr], -1)
+    ptr = where(ptr >= 0, arange(len(arr2), dtype=dtype)[ptr], -1)
 
     # count the sum of the boolean array
     counter = 0
@@ -116,7 +121,7 @@ def match_srt(arr1, arr2, cond):
             counter += 1
 
     # get the indices of the original mt_pid array satisfying the conditions
-    tmp = zeros(counter, dtype=int32)
+    tmp = zeros(counter, dtype=dtype)
     counter = 0
     for i in range(len(cond)):
         if cond[i] == True:
@@ -130,8 +135,8 @@ def match_srt(arr1, arr2, cond):
             counter += 1
 
     # record the common indices
-    comm1 = zeros(counter, dtype=int32)
-    comm2 = zeros(counter, dtype=int32)
+    comm1 = zeros(counter, dtype=dtype)
+    comm2 = zeros(counter, dtype=dtype)
     counter = 0
     for i in range(len(ptr)):
         if ptr[i] > -1:

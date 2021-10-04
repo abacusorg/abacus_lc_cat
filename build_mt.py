@@ -34,16 +34,10 @@ from tools.compute_dist import dist, wrapping
 
 # these are probably just for testing; should be removed for production
 DEFAULTS = {}
-#DEFAULTS['sim_name'] = "AbacusSummit_highbase_c021_ph000"
-#DEFAULTS['sim_name'] = "AbacusSummit_highbase_c000_ph100"
-#DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
-DEFAULTS['sim_name'] = "AbacusSummit_base_c019_ph000"
-#DEFAULTS['sim_name'] = "AbacusSummit_base_c123_ph000"
-#DEFAULTS['sim_name'] = "AbacusSummit_huge_c000_ph201"
-#DEFAULTS['merger_parent'] = "/mnt/gosling2/bigsims/merger"
+DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
 DEFAULTS['merger_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus/merger"
-#DEFAULTS['catalog_parent'] = "/mnt/gosling1/boryanah/light_cone_catalog/"
-DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
+#DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
+DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/new_lc_halos/"
 DEFAULTS['z_start'] = 0.1
 DEFAULTS['z_stop'] = 2.5
 DEFAULTS['superslab_start'] = 0
@@ -108,7 +102,7 @@ def solve_crossing(r1, r2, pos1, pos2, chi1, chi2, Lbox, origin, chs, complete=F
     r1, r2, pos1, pos2 = wrapping(r1, r2, pos1, pos2, chs[1], chs[0], Lbox, origin, extra)
     
     '''
-    # assert wrapping worked # testing here tuks
+    # assert wrapping worked 
     print(r1.dtype, pos2.dtype)
     r1_old, r2_old, pos1_old, pos2_old = r1.copy(), r2.copy(), pos1.copy(), pos2.copy()
     r1_new, r2_new, pos1_new, pos2_new = wrapping(r1, r2, pos1, pos2, chs[1], chs[0], Lbox, origin, extra)
@@ -126,7 +120,6 @@ def solve_crossing(r1, r2, pos1, pos2, chi1, chi2, Lbox, origin, chs, complete=F
     print(np.array(r1_old[~cond]))
     print(np.array(r2_old[~cond]))
     r1, r2, pos1, pos2 = r1_new, r2_new, pos1_new, pos2_new
-    # end tuks
     '''
     
     assert np.all(((r2 <= chs[1]) & (r2 > chs[0])) | ((r1 <= chs[1]) & (r1 > chs[0]))), "Wrapping didn't work"
@@ -209,7 +202,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, superslab_sta
     
     
     # directory where we save the final outputs
-    cat_lc_dir = catalog_parent / sim_name / "halos_light_cones/"
+    cat_lc_dir = catalog_parent / "halo_light_cones" / sim_name  
     os.makedirs(cat_lc_dir, exist_ok=True)
 
     # directory where we save the current state if we want to resume
@@ -295,18 +288,21 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, superslab_sta
         # this snapshot redshift and the previous
         z_this = zs_mt[i]
         z_prev = zs_mt[i + 1]
-        z_pprev = zs_mt[i + 2]
+        #z_pprev = zs_mt[i + 2] # not currently used
         print("redshift of this and the previous snapshot = ", z_this, z_prev)
 
+        # the names of the folders need to be standardized tuks
+        zname_this = min(header['L1OutputRedshifts'], key=lambda z: abs(z - z_this))
+        
         # check that you are starting at a reasonable redshift
         assert z_this >= np.min(zs_all), "You need to set starting redshift to the smallest value of the merger tree"
             
         # coordinate distance of the light cone at this redshift and the previous
         chi_this = chi_of_z(z_this)
         chi_prev = chi_of_z(z_prev)
-        chi_pprev = chi_of_z(z_pprev)
+        #chi_pprev = chi_of_z(z_pprev) # not currently used
         delta_chi = chi_prev - chi_this
-        delta_chi_new = chi_pprev - chi_prev
+        #delta_chi_new = chi_pprev - chi_prev # not currently used
         print("comoving distance between this and previous snapshot = ", delta_chi)
         
         # read merger trees file names at this and previous snapshot from minified version 
@@ -323,7 +319,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, superslab_sta
             fns_this = list(fns_this)
             fns_prev = list(fns_prev)
             minified = False
-
+            
         # turn file names into strings
         for counter in range(len(fns_this)):
             fns_this[counter] = str(fns_this[counter])
@@ -443,7 +439,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, superslab_sta
                 eligibility_prev = np.ones(N_halos_prev, dtype=bool)
                 eligibility_extrap_prev = np.ones(N_halos_prev, dtype=bool)
 
-                # only halos without merger tree info are allowed to use the extrap quantities; this is relevant if you're doing tuks
+                # only halos without merger tree info are allowed to use the extrap quantities; this is relevant if you're doing
                 # mask for eligible halos for light cone origin with and without information
                 mask_noinfo_this = noinfo_this & eligibility_this & eligibility_extrap_this
                 mask_info_this = info_this & eligibility_this
@@ -637,7 +633,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, superslab_sta
                 Merger_lc['InterpolatedPosition'] = offset_pos(Merger_lc['InterpolatedPosition'], ind_origin = o, all_origins=origins)
 
                 # create directory for this redshift
-                os.makedirs(cat_lc_dir / ("z%.3f"%z_this), exist_ok=True)
+                os.makedirs(cat_lc_dir / ("z%.3f"%zname_this), exist_ok=True)
 
                 '''
                 _, inds = np.unique(Merger_lc['HaloIndex'], return_index=True)
@@ -662,7 +658,7 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, superslab_sta
 
                 
                 # write table with interpolated information
-                save_asdf(Merger_lc, ("Merger_lc%d.%02d"%(o,k)), header, cat_lc_dir / ("z%.3f"%z_this))
+                save_asdf(Merger_lc, ("Merger_lc%d.%02d"%(o,k)), header, cat_lc_dir / ("z%.3f"%zname_this))
 
                 # mask of the extrapolated halos
                 mask_extrap = (Merger_this_info_lc['InterpolatedComoving'] > chi_prev) | (Merger_this_info_lc['InterpolatedComoving'] < chi_this)
