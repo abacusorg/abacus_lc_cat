@@ -170,21 +170,6 @@ def clean_cat(z_current, cat_lc_dir, want_subsample_B):
     if want_subsample_B:
         halo_npout += table_halo['npoutB']
     halo_origin = (table_halo['origin'])%3
-
-    # TESTING
-    '''
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-    
-    bins = np.logspace(1, 5, 41)
-    binc = (bins[1:]+bins[:-1])*.5
-    hist_nin, _ = np.histogram(table_halo['N'][table_halo['origin'] == 3], bins)
-    hist_all, _ = np.histogram(table_halo['N'], bins)
-    np.save("bins.npy", bins)
-    np.save("hist_all_nin.npy", hist_all)
-    np.save("hist_nin.npy", hist_nin)
-    '''
     
     # if we are removing the edges get rid of halos 10 Mpc/h off the x, y and z edges
     remove_edges = True
@@ -260,19 +245,6 @@ def clean_cat(z_current, cat_lc_dir, want_subsample_B):
         halo_inds = np.hstack((cond1, cond2))
         _, inds = np.unique(halo_index[halo_inds], return_index=True)
 
-        # TESTING
-        '''
-        _, inds, cts = np.unique(halo_index[halo_inds], return_index=True, return_counts=True)
-        N_nun = (table_halo['N'])[halo_inds[inds[cts > 1]]]
-        N_all = (table_halo['N'])[halo_inds[inds]]
-        bins = np.logspace(1, 5, 41)
-        binc = (bins[1:]+bins[:-1])*.5
-        hist_nun, _ = np.histogram(N_nun, bins)
-        hist_all, _ = np.histogram(N_all, bins)
-        np.save("bins.npy", bins)
-        np.save("hist_all.npy", hist_all)
-        np.save("hist_nun.npy", hist_nun)
-        '''
         
         # overwrite the information about the halos living in 0 or 1 (z < Lbox/2+10.) and then 0 or 2 (y < Lbox/2+10.)
         halo_mask_extra[halo_inds] = False
@@ -309,30 +281,6 @@ def clean_cat(z_current, cat_lc_dir, want_subsample_B):
     print("pid =/= 0 masking all percent = ", np.sum(parts_mask_extra)*100./len(parts_mask))
     print("pid == 0 masking w/o edges percent = ", perc_before-perc_after)
     print("number of particles missing w/o edges = ", (perc_before-perc_after)/100.*len(parts_mask))
-
-    '''
-    # TESTING
-    # define these for just the missing particles
-    # select the unique halos
-    # record the positions
-    parts_mask = np.logical_not(parts_mask_extra)
-    print("weirdos = ", np.sum(parts_mask))
-    print("weirdos percentage = ", np.sum(parts_mask)*100./len(parts_mask))
-    parts_halo_inds = parts_halo_inds[parts_mask]
-    uni_halo_inds, inds, counts = np.unique(parts_halo_inds, return_index=True, return_counts=True)
-    pos = table_halo['pos_interp'][uni_halo_inds]
-    x = table_halo['x_L2com'][uni_halo_inds]
-    redshift = table_halo['redshift_interp'][uni_halo_inds]
-    pos = pos[redshift < 2.18]
-    
-    #choice = (np.abs(pos[:, 0] + 681.) < 3.) & (np.abs(pos[:, 1] + 863) < 3.) & (np.abs(pos[:, 2] + 609.) < 3.)
-    #uni_choice = uni_halo_inds[choice]
-    #for field in table_halo:
-    #    print(table_halo[field][uni_choice])
-    np.savetxt('pos_missing.csv', pos, delimiter=",")
-    #np.savetxt('x_missing.csv', x, delimiter=",")
-    quit()
-    '''
     
     # filter out the host halo indices of the particles left after removing halos near edges, non-unique halos and particles that were not matched
     parts_halo_inds = parts_halo_inds[parts_mask]
@@ -390,10 +338,6 @@ def clean_cat(z_current, cat_lc_dir, want_subsample_B):
         #table_parts = Table(table_parts)
 
     # add columns for the averaged position and velocity
-    # TESTING
-    #table_halo = Table(table_halo)
-    #table_halo.add_column(np.zeros(halo_pos_avg.shape, dtype=np.float32), copy=False, name='pos_avg')
-    #table_halo.add_column(np.zeros(halo_vel_avg.shape, dtype=np.float32), copy=False, name='vel_avg')
     table_halo = {field: np.array(table_halo[field]) for field in table_halo}
     table_halo['pos_avg'] = np.empty(halo_pos_avg.shape, dtype=np.float32)
     table_halo['vel_avg'] = np.empty(halo_vel_avg.shape, dtype=np.float32)
@@ -417,7 +361,7 @@ def clean_cat(z_current, cat_lc_dir, want_subsample_B):
     table_parts['pos'] = float_trunc(table_parts['pos'], 4)
     table_parts['vel'] = float_trunc(table_parts['vel'], 12)
     #table_parts['redshift'] = float_trunc(table_parts['redshift'], 12)
-    table_parts = {field: np.array(table_parts[field]) for field in table_parts} # TESTING
+    table_parts = {field: np.array(table_parts[field]) for field in table_parts}
     
     # condense the asdf file
     halo_fn_new = cat_lc_dir / ("z%4.3f"%z_current) / ("lc"+str_edges+"_halo_info.asdf")
