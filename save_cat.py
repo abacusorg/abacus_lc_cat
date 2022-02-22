@@ -7,8 +7,8 @@ information from the CompaSO halo info catalogs.
 Prerequisites:
 subsample B particles for the given simulation
 If B particles not available, need to save on tape and create a symlink to the rest of the Abacus products.
-Then point `compaso_parent` to the new directory. See `tools/tape_scripts/` for instructions on how to do 
-this from the new tape directory.
+Then point `compaso_parent` to the new directory. Can be done using `tools/tape_scripts/script_copy_B.sh`
+and `tools/tape_scripts/script_symlink.sh`.
 
 Usage
 -----

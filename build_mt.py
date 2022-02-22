@@ -4,6 +4,10 @@ This is the first script in the "lightcone halo" pipeline.  The goal of this scr
 tree information to flag halos that intersect the lightcone and make a unique determination of which
 halo catalog epoch from which to draw the halo.
 
+Prerequisites:
+`all_headers/` directory containing copies of the headers of all light cone particle files (~1100 per
+simulation). If missing can be generated with `tools/script_headers.sh`.
+
 Usage
 -----
 $ ./build_mt.py --help
