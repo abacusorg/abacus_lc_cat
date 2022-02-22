@@ -4,6 +4,12 @@ This is the second script in the "lightcone halo" pipeline.  The goal of this sc
 from build_mt.py (i.e. information about what halos intersect the lightcone and when) and save the relevant
 information from the CompaSO halo info catalogs.
 
+Prerequisites:
+subsample B particles for the given simulation
+If B particles not available, need to save on tape and create a symlink to the rest of the Abacus products.
+Then point `compaso_parent` to the new directory. See `tools/tape_scripts/` for instructions on how to do 
+this from the new tape directory.
+
 Usage
 -----
 $ ./save_cat.py --help
@@ -31,11 +37,10 @@ from tools.merger import simple_load, get_halos_per_slab, get_zs_from_headers, g
 # these are probably just for testing; should be removed for production
 DEFAULTS = {}
 DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
-DEFAULTS['compaso_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus" # standard
-#DEFAULTS['compaso_parent'] = "/global/cscratch1/sd/boryanah/data_hybrid/tape_data" # if sownak deletes the particles mai nikoga
-#DEFAULTS['compaso_parent'] = "/global/cscratch1/sd/sbose/subsample_B_particles" # mai nikoga
-#DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
-DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/new_lc_halos/"
+DEFAULTS['compaso_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus"
+#DEFAULTS['compaso_parent'] = "/global/cscratch1/sd/boryanah/data_hybrid/tape_data" # 
+#DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/new_lc_halos/"
+DEFAULTS['catalog_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus/halo_light_cones/"
 DEFAULTS['merger_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus/merger"
 DEFAULTS['z_start'] = 0.1
 DEFAULTS['z_stop'] = 2.5
@@ -258,10 +263,7 @@ def main(sim_name, z_start, z_stop, compaso_parent, catalog_parent, merger_paren
             # list of halo indices
             halo_info_list = []
             for i in [0, 1, -1]:
-                # TESTING depending on whether B particles are in normal location or sownak's or mine
-                #halo_info_list.append(str(catdir / 'halo_info' / ('halo_info_%03d.asdf'%((k+i)%n_superslabs)))) # og
-                #halo_info_list.append(str(Path("/global/cscratch1/sd/sbose/subsample_B_particles") / sim_name / "halos"/ ("z%.3f"%z_cat) / 'halo_info' / ('halo_info_%03d.asdf'%((k+i)%n_superslabs)))) # tova e po-razlichno i se polzva kogato e cleaning/cleaned_halos (t.e. chasticite sa na mainata si)
-                halo_info_list.append(str(Path("/global/cscratch1/sd/boryanah/data_hybrid/tape_data") / sim_name / "halos"/ ("z%.3f"%z_cat) / 'halo_info' / ('halo_info_%03d.asdf'%((k+i)%n_superslabs)))) # ako sownak si iztrie tupite chastici
+                halo_info_list.append(str(catdir / 'halo_info' / ('halo_info_%03d.asdf'%((k+i)%n_superslabs))))
             # adding merger tree fields
             cleaned_halo_info_list = []
             for i in [0, 1, -1]:

@@ -24,8 +24,8 @@ from tools.InputFile import InputFile
 DEFAULTS = {}
 DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
 DEFAULTS['light_cone_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus"
-#DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
-DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/new_lc_halos/"
+#DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/new_lc_halos/"
+DEFAULTS['catalog_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus/halo_light_cones/"
 DEFAULTS['merger_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus/merger"
 DEFAULTS['z_lowest'] = 0.1
 DEFAULTS['z_highest'] =  2.5
@@ -195,9 +195,6 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
 
         # is this the redshift that's closest to the bridge between two redshifts?
         mid_bool = (np.argmin(np.abs(mt_chi_mean-chis_all)) <= j+buffer_no) & (np.argmin(np.abs(mt_chi_mean-chis_all)) >= j-buffer_no)
-
-        # TESTING
-        #mid_bool = True
         
         # if not in between two redshifts, we just need one catalog -- the one it is closest to; else keep both
         if not mid_bool:
@@ -223,7 +220,6 @@ def main(sim_name, z_lowest, z_highest, light_cone_parent, catalog_parent, merge
                     print("This redshift (z = %.3f) has already been recorded, skipping"%z_last)
                 else:
                     # save the information about that redshift into asdf file
-                    # TESTING
                     save_asdf(currently_loaded_tables[0], "pid_rv_lc", currently_loaded_headers[0], cat_lc_dir / ("z%4.3f"%currently_loaded_znames[0]))
                     print("saved catalog = ", currently_loaded_zs[0])
                     

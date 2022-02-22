@@ -36,8 +36,8 @@ from tools.compute_dist import dist, wrapping
 DEFAULTS = {}
 DEFAULTS['sim_name'] = "AbacusSummit_base_c000_ph006"
 DEFAULTS['merger_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus/merger"
-#DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/light_cone_catalog/"
-DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/new_lc_halos/"
+DEFAULTS['catalog_parent'] = "/global/project/projectdirs/desi/cosmosim/Abacus/halo_light_cones/"
+#DEFAULTS['catalog_parent'] = "/global/cscratch1/sd/boryanah/new_lc_halos/"
 DEFAULTS['z_start'] = 0.1
 DEFAULTS['z_stop'] = 2.5
 DEFAULTS['superslab_start'] = 0
@@ -459,9 +459,9 @@ def main(sim_name, z_start, z_stop, merger_parent, catalog_parent, superslab_sta
                     chi_low = chi_this
 
                 # select objects that are crossing the light cones
-                #chs = np.array([chi_low, chi_prev], dtype=np.float32) # og
-                chs = np.array([chi_low - delta_chi_old / 2.0, chi_prev], dtype=np.float32) # TESTING
-                #chs = np.array([chi_low - delta_chi_old / 2.0, chi_prev + delta_chi_new / 2.0], dtype=np.float32) # TESTING weirder idea
+                #chs = np.array([chi_low, chi_prev], dtype=np.float32) # doesn't take past halos
+                chs = np.array([chi_low - delta_chi_old / 2.0, chi_prev], dtype=np.float32) # taking some additional objects from before
+                #chs = np.array([chi_low - delta_chi_old / 2.0, chi_prev + delta_chi_new / 2.0], dtype=np.float32) # TESTING
                 cond_1 = ((Merger_this_info['ComovingDistance'] > chs[0]) & (Merger_this_info['ComovingDistance'] <= chs[1]))
                 cond_2 = ((Merger_prev_main_this_info['ComovingDistance'] > chs[0]) & (Merger_prev_main_this_info['ComovingDistance'] <= chs[1]))                
                 mask_lc_this_info = cond_1 | cond_2
